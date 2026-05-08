@@ -1,0 +1,18 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// Full schema จะถูกเพิ่มใน Phase 2 - Section 6
+// ดูรายละเอียดใน docs/UAT-Guideline-Dev.md
+// ─────────────────────────────────────────
+
+// Placeholder model — จะถูก replace ด้วย full schema ใน Section 6
+model Placeholder {
+  id Int @id @default(autoincrement())
+}

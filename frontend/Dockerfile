@@ -61,10 +61,6 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
-
-# Ensure Next runtime dependencies exist inside standalone runtime.
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/node_modules ./node_modules
-
 USER nextjs
 
 EXPOSE 3000
@@ -72,4 +68,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-CMD ["node", ".next/standalone/server.js"]
+CMD ["node", "server.js"]

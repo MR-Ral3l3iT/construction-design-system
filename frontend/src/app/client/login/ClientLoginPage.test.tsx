@@ -18,6 +18,10 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/client/login',
 }))
 
+vi.mock('next/image', () => ({
+  default: ({ alt }: { alt: string }) => <img alt={alt} />,
+}))
+
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -36,8 +40,8 @@ describe('ClientLoginPage', () => {
       </wrapper>,
     )
 
-    expect(screen.getByPlaceholderText('your@email.com')).toBeTruthy()
-    expect(screen.getByPlaceholderText('••••••••')).toBeTruthy()
+    expect(screen.getByPlaceholderText('อีเมล')).toBeTruthy()
+    expect(screen.getByPlaceholderText('รหัสผ่าน')).toBeTruthy()
     expect(screen.getByRole('button', { name: /เข้าสู่ระบบ/ })).toBeTruthy()
   })
 
@@ -53,10 +57,10 @@ describe('ClientLoginPage', () => {
       </wrapper>,
     )
 
-    fireEvent.change(screen.getByPlaceholderText('your@email.com'), {
+    fireEvent.change(screen.getByPlaceholderText('อีเมล'), {
       target: { value: 'client@test.com' },
     })
-    fireEvent.change(screen.getByPlaceholderText('••••••••'), {
+    fireEvent.change(screen.getByPlaceholderText('รหัสผ่าน'), {
       target: { value: 'pass1234' },
     })
     fireEvent.click(screen.getByRole('button', { name: /เข้าสู่ระบบ/ }))
@@ -81,10 +85,10 @@ describe('ClientLoginPage', () => {
       </wrapper>,
     )
 
-    fireEvent.change(screen.getByPlaceholderText('your@email.com'), {
+    fireEvent.change(screen.getByPlaceholderText('อีเมล'), {
       target: { value: 'client@test.com' },
     })
-    fireEvent.change(screen.getByPlaceholderText('••••••••'), {
+    fireEvent.change(screen.getByPlaceholderText('รหัสผ่าน'), {
       target: { value: 'pass1234' },
     })
     fireEvent.click(screen.getByRole('button', { name: /เข้าสู่ระบบ/ }))
@@ -106,10 +110,10 @@ describe('ClientLoginPage', () => {
       </wrapper>,
     )
 
-    fireEvent.change(screen.getByPlaceholderText('your@email.com'), {
+    fireEvent.change(screen.getByPlaceholderText('อีเมล'), {
       target: { value: 'worker@test.com' },
     })
-    fireEvent.change(screen.getByPlaceholderText('••••••••'), {
+    fireEvent.change(screen.getByPlaceholderText('รหัสผ่าน'), {
       target: { value: 'pass1234' },
     })
     fireEvent.click(screen.getByRole('button', { name: /เข้าสู่ระบบ/ }))
@@ -131,10 +135,10 @@ describe('ClientLoginPage', () => {
       </wrapper>,
     )
 
-    fireEvent.change(screen.getByPlaceholderText('your@email.com'), {
+    fireEvent.change(screen.getByPlaceholderText('อีเมล'), {
       target: { value: 'bad@test.com' },
     })
-    fireEvent.change(screen.getByPlaceholderText('••••••••'), {
+    fireEvent.change(screen.getByPlaceholderText('รหัสผ่าน'), {
       target: { value: 'wrongpass' },
     })
     fireEvent.click(screen.getByRole('button', { name: /เข้าสู่ระบบ/ }))

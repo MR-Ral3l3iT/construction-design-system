@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { Lock, Mail, X, Share, MoreVertical, PlusSquare } from 'lucide-react'
 import { useClientLogin } from '@/hooks/useClientAuth'
 
@@ -94,6 +95,7 @@ function InstallHint({
 }
 
 export default function ClientLoginPage() {
+  const router = useRouter()
   const loginMutation = useClientLogin()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -111,7 +113,7 @@ export default function ClientLoginPage() {
         localStorage.removeItem('client_access_token')
         return
       }
-      window.location.href = '/client/projects'
+      router.push('/client/projects')
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
       setError(typeof msg === 'string' ? msg : 'อีเมลหรือรหัสผ่านไม่ถูกต้อง')

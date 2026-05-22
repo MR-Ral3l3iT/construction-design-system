@@ -33,6 +33,7 @@ export function prismaMock() {
     designTask: makeModel(),
     bOQ: makeModel(),
     bOQCategory: makeModel(),
+    bOQSubCategory: makeModel(),
     bOQItem: makeModel(),
     contract: makeModel(),
     paymentMilestone: makeModel(),

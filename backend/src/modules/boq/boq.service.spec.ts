@@ -29,7 +29,7 @@ const makeCategory = (overrides = {}) => ({
   boqId: 1,
   name: 'งานโครงสร้าง',
   sortOrder: 0,
-  items: [],
+  subCategories: [],
   ...overrides,
 })
 
@@ -103,7 +103,9 @@ describe('BOQService', () => {
       // overhead=200, profit=300 → total=3500
       prisma.bOQCategory.findMany.mockResolvedValue([
         makeCategory({
-          items: [makeItem({ quantity: '100', materialPrice: '25', laborPrice: '5' })],
+          subCategories: [
+            { id: 1, items: [makeItem({ quantity: '100', materialPrice: '25', laborPrice: '5' })] },
+          ],
         }),
       ])
       prisma.bOQ.findUnique.mockResolvedValue(
@@ -112,7 +114,7 @@ describe('BOQService', () => {
       prisma.bOQ.update.mockResolvedValue(makeBOQ())
 
       // Call via addItem path which calls recalcTotal internally
-      prisma.bOQCategory.findUnique.mockResolvedValue(makeCategory({ boqId: 1 }))
+      prisma.bOQSubCategory.findUnique.mockResolvedValue({ category: { boqId: 1 } })
       prisma.bOQ.findFirst.mockResolvedValue(makeBOQ())
       prisma.bOQItem.create.mockResolvedValue(makeItem())
 

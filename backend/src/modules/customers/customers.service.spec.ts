@@ -1,8 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { NotFoundException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { CustomersService } from './customers.service'
 import { PrismaService } from '../../database/prisma.service'
 import { ActivityLogService } from '../../common/services/activity-log.service'
+import { MailService } from '../mail/mail.service'
 import { prismaMock } from '../../../test/prisma-mock'
 
 const makeCustomer = (overrides = {}) => ({
@@ -37,6 +39,11 @@ describe('CustomersService', () => {
         CustomersService,
         { provide: PrismaService, useValue: prisma },
         { provide: ActivityLogService, useValue: activityLog },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('http://localhost:3003') },
+        },
+        { provide: MailService, useValue: { sendCredentials: jest.fn() } },
       ],
     }).compile()
     service = module.get<CustomersService>(CustomersService)

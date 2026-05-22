@@ -2,7 +2,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-RUN npm install -g pnpm@9
+RUN npm install -g pnpm@10
 
 # Copy workspace manifests
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
@@ -15,7 +15,7 @@ RUN pnpm install --frozen-lockfile --filter @construction/backend...
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-RUN npm install -g pnpm@9
+RUN npm install -g pnpm@10
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages ./packages
@@ -37,7 +37,7 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs \
  && adduser  --system --uid 1001 nestjs
 
-RUN npm install -g pnpm@9
+RUN npm install -g pnpm@10
 
 # Only production deps
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./

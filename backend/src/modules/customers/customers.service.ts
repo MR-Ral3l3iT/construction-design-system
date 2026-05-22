@@ -373,12 +373,19 @@ export class CustomersService {
     const customer = await this.findOne(customerId)
     if (!customer.user) throw new BadRequestException('ลูกค้านี้ยังไม่มีบัญชี Client Portal')
 
+    const plainPassword = crypto.randomBytes(5).toString('hex')
+    await this.prisma.user.update({
+      where: { id: customer.user.id },
+      data: { password: await bcrypt.hash(plainPassword, 10) },
+    })
+
     const to = customer.user.email
     const appUrl = this.config.get<string>('APP_URL') ?? 'http://localhost:3003'
 
     await this.mail.sendCredentials(to, {
       customerName: customer.name,
       email: to,
+      password: plainPassword,
       appUrl,
     })
 

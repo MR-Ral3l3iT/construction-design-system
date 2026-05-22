@@ -22,6 +22,7 @@ export interface PaymentDueContext {
 export interface CredentialsContext {
   customerName: string
   email: string
+  password: string
   appUrl: string
 }
 

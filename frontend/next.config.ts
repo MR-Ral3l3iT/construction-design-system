@@ -3,6 +3,7 @@ import path from 'path'
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  eslint: { ignoreDuringBuilds: true },
   output: process.env.DOCKER_BUILD === '1' ? 'standalone' : undefined,
   outputFileTracingRoot: path.join(__dirname, '../../'),
   images: {

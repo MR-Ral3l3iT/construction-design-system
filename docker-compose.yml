@@ -4,7 +4,7 @@ services:
   # ─────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    platform: linux/arm64
+    platform: linux/amd64
     container_name: cds-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-construction_db}
@@ -30,7 +30,7 @@ services:
   # ─────────────────────────────────────────
   minio:
     image: minio/minio:latest
-    platform: linux/arm64
+    platform: linux/amd64
     container_name: cds-minio
     command: server /data --console-address ':9001'
     environment:
@@ -45,7 +45,7 @@ services:
       - cds-network
     restart: unless-stopped
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -57,29 +57,30 @@ services:
   # ─────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: cds-backend
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-construction_db}
+      PORT: '3001'
       MINIO_ENDPOINT: minio
       MINIO_PORT: '9000'
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - '${BACKEND_PORT:-3001}:3001'
+      - '${BACKEND_PORT:-3004}:3001'
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:3001/api/v1/health']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/api/v1/health || exit 1']
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 30s
     networks:
       - cds-network
     restart: unless-stopped
@@ -91,14 +92,18 @@ services:
   # ─────────────────────────────────────────
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3004}
     container_name: cds-frontend
     env_file: .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3004}
+      PORT: '3000'
+      HOSTNAME: '0.0.0.0'
+    expose:
+      - '3000'
     depends_on:
       - backend
     networks:
@@ -121,8 +126,12 @@ services:
       - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+      minio:
+        condition: service_healthy
     networks:
       - cds-network
     restart: unless-stopped

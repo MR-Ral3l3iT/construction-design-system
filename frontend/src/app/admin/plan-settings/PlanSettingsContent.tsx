@@ -382,7 +382,8 @@ function TemplatePhaseSection({ phase, templateId }: { phase: TemplatePhase; tem
         }
       >
         <p className="text-sm text-gray-600">
-          ลบงาน <span className="font-medium">"{deleteTask?.title}"</span> ออกจาก template?
+          ลบงาน <span className="font-medium">&quot;{deleteTask?.title}&quot;</span> ออกจาก
+          template?
         </p>
       </FormModal>
     </div>
@@ -562,7 +563,7 @@ function TemplateCard({ tmpl }: { tmpl: PlanTemplate }) {
         }
       >
         <p className="text-sm text-gray-600">
-          ลบ Template <span className="font-medium">"{tmpl.name}"</span>?
+          ลบ Template <span className="font-medium">&quot;{tmpl.name}&quot;</span>?
         </p>
         <p className="mt-1 text-xs text-red-500">ไม่สามารถลบได้หากมีโครงการใช้ template นี้อยู่</p>
       </FormModal>

@@ -796,7 +796,8 @@ function PhaseSection({
         }
       >
         <p className="text-sm text-gray-600">
-          คุณต้องการลบงาน <span className="font-medium text-gray-900">"{deleteTask?.title}"</span>{' '}
+          คุณต้องการลบงาน{' '}
+          <span className="font-medium text-gray-900">&quot;{deleteTask?.title}&quot;</span>{' '}
           ใช่หรือไม่?
         </p>
         <p className="mt-1 text-xs text-gray-400">การลบนี้ไม่สามารถเรียกคืนได้</p>

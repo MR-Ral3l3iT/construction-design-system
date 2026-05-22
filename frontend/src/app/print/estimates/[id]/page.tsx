@@ -582,7 +582,7 @@ function EstimatePrint({ estimateId }: { estimateId: number }) {
           ✕ ปิด
         </button>
         <span style={{ color: '#64748b', fontSize: 12 }}>
-          พิมพ์ออก 2 ชุด: ต้นฉบับ + สำเนา — เลือก "Save as PDF" เพื่อดาวน์โหลด
+          พิมพ์ออก 2 ชุด: ต้นฉบับ + สำเนา — เลือก &quot;Save as PDF&quot; เพื่อดาวน์โหลด
         </span>
       </div>
 

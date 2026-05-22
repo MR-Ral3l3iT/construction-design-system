@@ -177,7 +177,9 @@ export function ImportSubQuotationModal({ open, onClose, estimateId, projectId }
           <div className="rounded-lg border border-dashed border-gray-200 py-8 text-center">
             <ChevronDown className="mx-auto mb-2 h-6 w-6 text-gray-300" />
             <p className="text-sm text-gray-500">ไม่มีใบเสนอราคาที่ตอบรับแล้ว</p>
-            <p className="text-xs text-gray-400 mt-1">ใบเสนอราคาต้องมีสถานะ "ตอบรับ" และมี BOQ</p>
+            <p className="text-xs text-gray-400 mt-1">
+              ใบเสนอราคาต้องมีสถานะ &quot;ตอบรับ&quot; และมี BOQ
+            </p>
           </div>
         ) : (
           <>

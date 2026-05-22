@@ -60,7 +60,7 @@ jobs:
         run: pnpm --filter @construction/backend lint
 
       - name: Type check
-        run: pnpm --filter @construction/backend exec tsc --noEmit
+        run: pnpm --filter @construction/backend exec tsc --noEmit --project tsconfig.build.json
 
       - name: Run unit tests
         run: pnpm --filter @construction/backend exec jest --passWithNoTests

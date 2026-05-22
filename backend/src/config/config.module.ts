@@ -22,7 +22,7 @@ import * as Joi from 'joi'
         JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
 
         // CORS
-        CORS_ORIGINS: Joi.string().default('http://localhost:3000'),
+        CORS_ORIGINS: Joi.string().default('http://localhost:3003'),
 
         // MinIO / Storage
         MINIO_ENDPOINT: Joi.string().default('localhost'),

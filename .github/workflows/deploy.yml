@@ -1,0 +1,42 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "deploy" to confirm production deployment
+        required: true
+
+jobs:
+  deploy:
+    name: SSH Deploy
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'deploy'
+    environment: production
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "Pulling latest images..."
+            docker compose pull --quiet
+
+            echo "Running database migrations..."
+            docker compose run --rm backend sh -c "
+              cd /app/backend && npx prisma migrate deploy
+            "
+
+            echo "Starting services..."
+            docker compose --profile full up -d --remove-orphans
+
+            echo "Cleaning up old images..."
+            docker image prune -f
+
+            echo "Deploy complete ✓"

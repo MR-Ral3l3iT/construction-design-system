@@ -7,12 +7,1065 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─────────────────────────────────────────
-// Full schema จะถูกเพิ่มใน Phase 2 - Section 6
-// ดูรายละเอียดใน docs/UAT-Guideline-Dev.md
-// ─────────────────────────────────────────
+// =============================================================================
+// ENUMS
+// =============================================================================
 
-// Placeholder model — จะถูก replace ด้วย full schema ใน Section 6
-model Placeholder {
-  id Int @id @default(autoincrement())
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  COMPANY
+}
+
+/// สถานะ lead pipeline ตั้งแต่รับงานจนปิดการขาย
+enum LeadStatus {
+  INTERESTED      // สนใจ
+  SITE_VISIT      // นัดสำรวจหน้างาน
+  QUOTED          // เสนอราคาแล้ว
+  CLOSED_WON      // ปิดการขายสำเร็จ
+  CLOSED_LOST     // ไม่ผ่าน / ไม่สนใจ
+}
+
+enum ProjectType {
+  DESIGN_ONLY
+  CONSTRUCTION
+  TURNKEY
+}
+
+enum ProjectStatus {
+  LEAD
+  ESTIMATING
+  DESIGNING
+  WAITING_APPROVAL
+  BOQ
+  CONTRACT
+  CONSTRUCTION
+  HANDOVER
+  COMPLETED
+  CANCELLED
+}
+
+enum EstimateStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+}
+
+enum DesignTaskStatus {
+  TODO
+  IN_PROGRESS
+  WAITING_REVIEW
+  REVISION
+  APPROVED
+  CANCELLED
+}
+
+enum BOQStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  LOCKED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+enum ConstructionTaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+}
+
+enum DailyUpdateStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum DailyReportStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum DailyReportItemStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum WeatherCondition {
+  SUNNY         // แดดจัด
+  PARTLY_CLOUDY // มีเมฆบางส่วน
+  CLOUDY        // มีเมฆมาก
+  RAINY         // ฝนตก
+  HEAVY_RAIN    // ฝนตกหนัก
+  STORMY        // พายุ
+}
+
+enum ReportIssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ReportIssueStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ReportImageType {
+  BEFORE
+  AFTER
+  PROGRESS
+  OTHER
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ChangeRequestStatus {
+  REQUESTED
+  ESTIMATING
+  WAITING_APPROVAL
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum FileCategory {
+  DESIGN
+  BOQ
+  CONTRACT
+  DAILY_UPDATE
+  ISSUE
+  PAYMENT
+  HANDOVER
+  PLAN
+  IMAGE
+  OTHER
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CommentTargetType {
+  PROJECT
+  DESIGN_TASK
+  DAILY_UPDATE
+  ISSUE
+  CHANGE_REQUEST
+  BOQ
+  PAYMENT
+}
+
+// =============================================================================
+// AUTH / USER / ROLE
+// =============================================================================
+
+model User {
+  id        Int        @id @default(autoincrement())
+  name      String
+  email     String     @unique
+  password  String
+  phone     String?
+  avatar    String?
+  status    UserStatus @default(ACTIVE)
+
+  roles            UserRole[]
+  assignedProjects ProjectMember[]
+  dailyUpdates     DailyUpdate[]
+  dailyReports     DailyReport[]
+  comments         Comment[]
+  approvals        Approval[]
+  files            FileAsset[]
+  customer         Customer?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("users")
+}
+
+model Role {
+  id          Int    @id @default(autoincrement())
+  name        String @unique
+  description String?
+  isActive    Boolean @default(true)
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  name        String
+  group       String
+  description String?
+  isActive    Boolean @default(true)
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id     Int @id @default(autoincrement())
+  userId Int
+  roleId Int
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           Int @id @default(autoincrement())
+  roleId       Int
+  permissionId Int
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// =============================================================================
+// CUSTOMER / LEAD
+// =============================================================================
+
+model Customer {
+  id          Int          @id @default(autoincrement())
+  type        CustomerType @default(INDIVIDUAL)
+  name        String
+  companyName String?
+  taxId       String?   /// เลขประจำตัวผู้เสียภาษี (13 หลัก) — เฉพาะนิติบุคคล
+  email       String?
+  phone       String?
+  lineId      String?
+  address     String?
+  province    String?
+  district    String?
+  subdistrict String?
+  postcode    String?
+  note        String?
+  avatarUrl   String?
+
+  /// สถานะ lead pipeline — INTERESTED → SITE_VISIT → QUOTED → CLOSED_WON / CLOSED_LOST
+  leadStatus LeadStatus @default(INTERESTED)
+
+  /// user account สำหรับ Client Portal
+  userId Int? @unique
+  user   User? @relation(fields: [userId], references: [id])
+
+  projects Project[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("customers")
+}
+
+// =============================================================================
+// PROJECT
+// =============================================================================
+
+model Project {
+  id          Int           @id @default(autoincrement())
+  /// auto-generated: DS-YYYY-NNNN / CN-YYYY-NNNN / DC-YYYY-NNNN
+  code        String        @unique
+  name        String
+  type        ProjectType
+  status      ProjectStatus @default(LEAD)
+  customerId  Int
+  addressLine String?
+  province    String?
+  district    String?
+  subdistrict String?
+  postcode    String?
+  latitude    Decimal?      @db.Decimal(10, 7)
+  longitude   Decimal?      @db.Decimal(10, 7)
+  areaSize    Decimal?      @db.Decimal(15, 2)
+  description String?
+  budgetMin   Decimal?      @db.Decimal(15, 2)
+  budgetMax   Decimal?      @db.Decimal(15, 2)
+  startDate         DateTime?
+  endDate           DateTime?
+  designStartDate   DateTime?
+  designEndDate     DateTime?
+  progress    Int           @default(0)
+
+  customer       Customer          @relation(fields: [customerId], references: [id])
+  members        ProjectMember[]
+  estimates      Estimate[]
+  designTasks    DesignTask[]
+  boqs           BOQ[]
+  quotations     Quotation[]
+  contracts      Contract[]
+  payments       PaymentMilestone[]
+  plan           ProjectPlan?
+  dailyUpdates   DailyUpdate[]
+  dailyReports   DailyReport[]
+  issues         Issue[]
+  changeRequests ChangeRequest[]
+  files          FileAsset[]
+  comments       Comment[]
+  approvals      Approval[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        Int     @id @default(autoincrement())
+  projectId Int
+  userId    Int
+  roleName  String?
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+// =============================================================================
+// ESTIMATE / QUOTATION
+// =============================================================================
+
+model Estimate {
+  id          Int            @id @default(autoincrement())
+  projectId   Int
+  /// auto-generated: QT{YYYYMMDD}{NNN} (เช่น QT20260513001)
+  code        String         @unique
+  title       String
+  description String?
+  status      EstimateStatus @default(DRAFT)
+  totalAmount Decimal        @default(0) @db.Decimal(15, 2)
+
+  project      Project               @relation(fields: [projectId], references: [id])
+  items        EstimateItem[]
+  installments EstimateInstallment[]
+  files        FileAsset[]
+  payments     PaymentMilestone[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("estimates")
+}
+
+model EstimateItem {
+  id             Int     @id @default(autoincrement())
+  estimateId     Int
+  subQuotationId Int?
+  name           String
+  description    String?
+  quantity       Decimal @default(1) @db.Decimal(10, 3)
+  unit           String?
+  unitPrice      Decimal @default(0) @db.Decimal(15, 2)
+  totalPrice     Decimal @default(0) @db.Decimal(15, 2)
+  sortOrder      Int     @default(0)
+
+  estimate     Estimate      @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  subQuotation SubQuotation? @relation(fields: [subQuotationId], references: [id])
+
+  @@map("estimate_items")
+}
+
+model EstimateInstallment {
+  id            Int     @id @default(autoincrement())
+  estimateId    Int
+  installmentNo Int
+  description   String
+  percentage    Decimal @db.Decimal(5, 2)
+  amount        Decimal @db.Decimal(15, 2)
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("estimate_installments")
+}
+
+// =============================================================================
+// DESIGN TASK
+// =============================================================================
+
+model DesignTask {
+  id          Int              @id @default(autoincrement())
+  projectId   Int
+  title       String
+  description String?
+  status      DesignTaskStatus @default(TODO)
+  revisionNo  Int              @default(1)
+  startDate   DateTime?
+  dueDate     DateTime?
+  approvedAt  DateTime?
+
+  project   Project    @relation(fields: [projectId], references: [id])
+  files     FileAsset[]
+  comments  Comment[]
+  approvals Approval[]
+  boqs      BOQ[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("design_tasks")
+}
+
+// =============================================================================
+// BOQ
+// =============================================================================
+
+model BOQ {
+  id           Int       @id @default(autoincrement())
+  projectId    Int
+  designTaskId Int?
+  /// auto-generated: BOQ-YYYY-NNN (เช่น BOQ-2026-001)
+  code         String    @unique
+  title        String
+  status       BOQStatus @default(DRAFT)
+  version      Int       @default(1)
+  isLocked     Boolean   @default(false)
+  materialCost Decimal   @default(0) @db.Decimal(15, 2)
+  laborCost    Decimal   @default(0) @db.Decimal(15, 2)
+  overheadCost Decimal   @default(0) @db.Decimal(15, 2)
+  profit       Decimal   @default(0) @db.Decimal(15, 2)
+  totalAmount  Decimal   @default(0) @db.Decimal(15, 2)
+
+  project    Project       @relation(fields: [projectId], references: [id])
+  designTask DesignTask?   @relation(fields: [designTaskId], references: [id])
+  categories BOQCategory[]
+  files      FileAsset[]
+  approvals  Approval[]
+  quotations Quotation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("boqs")
+}
+
+model BOQCategory {
+  id        Int    @id @default(autoincrement())
+  boqId     Int
+  name      String
+  sortOrder Int    @default(0)
+
+  boq           BOQ              @relation(fields: [boqId], references: [id], onDelete: Cascade)
+  subCategories BOQSubCategory[]
+
+  @@map("boq_categories")
+}
+
+model BOQSubCategory {
+  id         Int    @id @default(autoincrement())
+  categoryId Int
+  name       String
+  sortOrder  Int    @default(0)
+
+  category BOQCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  items    BOQItem[]
+
+  @@map("boq_sub_categories")
+}
+
+model BOQItem {
+  id            Int     @id @default(autoincrement())
+  subCategoryId Int
+  name          String
+  description   String?
+  remark        String?
+  quantity      Decimal @default(1) @db.Decimal(10, 3)
+  unit          String?
+  materialPrice Decimal @default(0) @db.Decimal(15, 2)
+  laborPrice    Decimal @default(0) @db.Decimal(15, 2)
+  totalPrice    Decimal @default(0) @db.Decimal(15, 2)
+  sortOrder     Int     @default(0)
+
+  subCategory BOQSubCategory @relation(fields: [subCategoryId], references: [id], onDelete: Cascade)
+
+  @@map("boq_items")
+}
+
+// =============================================================================
+// CONTRACT / PAYMENT
+// =============================================================================
+
+model Contract {
+  id           Int            @id @default(autoincrement())
+  projectId    Int
+  /// auto-generated: CON-YYYY-NNN (เช่น CON-2026-001)
+  code         String         @unique
+  title        String
+  status       ContractStatus @default(DRAFT)
+  contractDate DateTime?
+  startDate    DateTime?
+  endDate      DateTime?
+  totalAmount  Decimal        @default(0) @db.Decimal(15, 2)
+
+  project Project     @relation(fields: [projectId], references: [id])
+  files   FileAsset[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("contracts")
+}
+
+model PaymentMilestone {
+  id              Int           @id @default(autoincrement())
+  projectId       Int
+  quotationId     Int?
+  subQuotationId  Int?
+  estimateId      Int?
+  title           String
+  description     String?
+  amount          Decimal       @default(0) @db.Decimal(15, 2)
+  dueDate         DateTime?
+  paidDate        DateTime?
+  status          PaymentStatus @default(UNPAID)
+  sortOrder       Int           @default(0)
+
+  project      Project       @relation(fields: [projectId], references: [id])
+  quotation    Quotation?    @relation(fields: [quotationId], references: [id])
+  subQuotation SubQuotation? @relation(fields: [subQuotationId], references: [id])
+  estimate     Estimate?     @relation(fields: [estimateId], references: [id])
+  files        FileAsset[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("payment_milestones")
+}
+
+// =============================================================================
+// PROJECT PLAN TEMPLATES
+// =============================================================================
+
+model ProjectPlanTemplate {
+  id     Int    @id @default(autoincrement())
+  name   String
+  type   String @unique
+  phases ProjectPlanTemplatePhase[]
+
+  @@map("project_plan_templates")
+}
+
+model ProjectPlanTemplatePhase {
+  id         Int                      @id @default(autoincrement())
+  templateId Int
+  name       String
+  sortOrder  Int                      @default(0)
+  template   ProjectPlanTemplate      @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  tasks      ProjectPlanTemplateTask[]
+
+  @@map("project_plan_template_phases")
+}
+
+model ProjectPlanTemplateTask {
+  id              Int                      @id @default(autoincrement())
+  phaseId         Int
+  title           String
+  description     String?
+  defaultDuration Int?
+  sortOrder       Int                      @default(0)
+  isOptional      Boolean                  @default(false)
+  phase           ProjectPlanTemplatePhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+
+  @@map("project_plan_template_tasks")
+}
+
+// =============================================================================
+// PROJECT PLAN (1 PROJECT = 1 PLAN)
+// =============================================================================
+
+model ProjectPlan {
+  id           Int               @id @default(autoincrement())
+  projectId    Int               @unique
+  templateType String?
+  title        String
+  description  String?
+  startDate    DateTime?
+  endDate      DateTime?
+
+  project  Project          @relation(fields: [projectId], references: [id])
+  phases   ProjectPlanPhase[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("project_plans")
+}
+
+model ProjectPlanPhase {
+  id        Int               @id @default(autoincrement())
+  planId    Int
+  name      String
+  sortOrder Int               @default(0)
+
+  plan  ProjectPlan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  tasks ProjectPlanTask[]
+
+  @@map("project_plan_phases")
+}
+
+model ProjectPlanTask {
+  id          Int                    @id @default(autoincrement())
+  phaseId     Int
+  title       String
+  description String?
+  status      ConstructionTaskStatus @default(TODO)
+  startDate   DateTime?
+  endDate     DateTime?
+  progress    Int                    @default(0)
+  sortOrder   Int                    @default(0)
+  isOptional  Boolean                @default(false)
+
+  phase ProjectPlanPhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  files FileAsset[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("project_plan_tasks")
+}
+
+// =============================================================================
+// DAILY UPDATE
+// =============================================================================
+
+model DailyUpdate {
+  id          Int               @id @default(autoincrement())
+  projectId   Int
+  createdById Int
+  updateDate  DateTime
+  title       String?
+  workDone    String
+  nextPlan    String?
+  problem     String?
+  progress    Int               @default(0)
+  status      DailyUpdateStatus @default(DRAFT)
+
+  project   Project     @relation(fields: [projectId], references: [id])
+  createdBy User        @relation(fields: [createdById], references: [id])
+  files     FileAsset[]
+  comments  Comment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("daily_updates")
+}
+
+// =============================================================================
+// DAILY REPORT (ระบบรายงานประจำวันใหม่)
+// =============================================================================
+
+model WorkCategory {
+  id          Int     @id @default(autoincrement())
+  name        String
+  description String?
+  color       String? // hex color สำหรับ UI badge
+  order       Int     @default(0)
+  isActive    Boolean @default(true)
+
+  reportItems DailyReportItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("work_categories")
+}
+
+model DailyReport {
+  id              Int               @id @default(autoincrement())
+  projectId       Int
+  createdById     Int
+  reportDate      DateTime          @db.Date
+  weather         WeatherCondition?
+  overallProgress Int               @default(0)
+  nextPlan        String?
+  issueSummary    String?
+  status          DailyReportStatus @default(DRAFT)
+  publishedAt     DateTime?
+
+  project   Project            @relation(fields: [projectId], references: [id])
+  createdBy User               @relation(fields: [createdById], references: [id])
+  items     DailyReportItem[]
+  issues    DailyReportIssue[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([projectId, reportDate])
+  @@map("daily_reports")
+}
+
+model DailyReportItem {
+  id          Int                   @id @default(autoincrement())
+  reportId    Int
+  categoryId  Int
+  description String
+  progress    Int                   @default(0)
+  unit        String?
+  quantity    Decimal?              @db.Decimal(10, 3)
+  status      DailyReportItemStatus @default(IN_PROGRESS)
+  sortOrder   Int                   @default(0)
+
+  report   DailyReport        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  category WorkCategory       @relation(fields: [categoryId], references: [id])
+  images   DailyReportImage[]
+
+  @@map("daily_report_items")
+}
+
+model DailyReportImage {
+  id           Int     @id @default(autoincrement())
+  reportItemId Int
+  imageUrl     String
+  storageKey   String?
+  caption      String?
+  imageType    ReportImageType @default(PROGRESS)
+  sortOrder    Int             @default(0)
+
+  reportItem DailyReportItem @relation(fields: [reportItemId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("daily_report_images")
+}
+
+model DailyReportIssue {
+  id         Int                 @id @default(autoincrement())
+  reportId   Int
+  issue      String
+  impact     String?
+  solution   String?
+  severity   ReportIssueSeverity @default(MEDIUM)
+  status     ReportIssueStatus   @default(OPEN)
+  resolvedAt DateTime?
+
+  report DailyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("daily_report_issues")
+}
+
+// =============================================================================
+// ISSUE / CHANGE REQUEST
+// =============================================================================
+
+model Issue {
+  id          Int           @id @default(autoincrement())
+  projectId   Int
+  title       String
+  description String?
+  status      IssueStatus   @default(OPEN)
+  priority    IssuePriority @default(MEDIUM)
+  dueDate     DateTime?
+  resolvedAt  DateTime?
+
+  project  Project     @relation(fields: [projectId], references: [id])
+  files    FileAsset[]
+  comments Comment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("issues")
+}
+
+model ChangeRequest {
+  id              Int                 @id @default(autoincrement())
+  projectId       Int
+  title           String
+  description     String?
+  reason          String?
+  status          ChangeRequestStatus @default(REQUESTED)
+  estimatedAmount Decimal?            @db.Decimal(15, 2)
+  approvedAmount  Decimal?            @db.Decimal(15, 2)
+  approvedAt      DateTime?
+
+  project   Project    @relation(fields: [projectId], references: [id])
+  files     FileAsset[]
+  comments  Comment[]
+  approvals Approval[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("change_requests")
+}
+
+// =============================================================================
+// FILE ASSET
+// =============================================================================
+
+model FileAsset {
+  id              Int          @id @default(autoincrement())
+  projectId       Int?
+  uploadedById    Int?
+  estimateId      Int?
+  designTaskId    Int?
+  planTaskId      Int?
+  boqId           Int?
+  contractId      Int?
+  paymentId       Int?
+  dailyUpdateId   Int?
+  issueId         Int?
+  changeRequestId Int?
+  category        FileCategory @default(OTHER)
+  filename        String
+  originalName    String
+  mimeType        String?
+  size            Int?
+  storageKey      String
+  url             String?
+
+  project       Project?          @relation(fields: [projectId], references: [id])
+  uploadedBy    User?             @relation(fields: [uploadedById], references: [id])
+  estimate      Estimate?         @relation(fields: [estimateId], references: [id])
+  designTask    DesignTask?       @relation(fields: [designTaskId], references: [id])
+  planTask      ProjectPlanTask?  @relation(fields: [planTaskId], references: [id])
+  boq           BOQ?              @relation(fields: [boqId], references: [id])
+  contract      Contract?         @relation(fields: [contractId], references: [id])
+  payment       PaymentMilestone? @relation(fields: [paymentId], references: [id])
+  dailyUpdate   DailyUpdate?      @relation(fields: [dailyUpdateId], references: [id])
+  issue         Issue?            @relation(fields: [issueId], references: [id])
+  changeRequest ChangeRequest?    @relation(fields: [changeRequestId], references: [id])
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@map("file_assets")
+}
+
+// =============================================================================
+// COMMENT
+// =============================================================================
+
+model Comment {
+  id              Int               @id @default(autoincrement())
+  projectId       Int?
+  userId          Int
+  targetType      CommentTargetType
+  targetId        Int
+  designTaskId    Int?
+  dailyUpdateId   Int?
+  issueId         Int?
+  changeRequestId Int?
+  message         String
+
+  project       Project?       @relation(fields: [projectId], references: [id])
+  user          User           @relation(fields: [userId], references: [id])
+  designTask    DesignTask?    @relation(fields: [designTaskId], references: [id])
+  dailyUpdate   DailyUpdate?   @relation(fields: [dailyUpdateId], references: [id])
+  issue         Issue?         @relation(fields: [issueId], references: [id])
+  changeRequest ChangeRequest? @relation(fields: [changeRequestId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("comments")
+}
+
+// =============================================================================
+// QUOTATION (ใบเสนอราคา — snapshot จาก BOQ)
+// =============================================================================
+
+model Quotation {
+  id          Int             @id @default(autoincrement())
+  /// auto-generated: QT-YYYY-NNNN
+  code        String          @unique
+  projectId   Int
+  boqId       Int?
+  title       String
+  status      QuotationStatus @default(DRAFT)
+  validUntil  DateTime?
+  note        String?
+  mgmtRate    Decimal         @default(0.10) @db.Decimal(5, 4)
+  vatRate     Decimal         @default(0.07) @db.Decimal(5, 4)
+  subtotal    Decimal         @default(0) @db.Decimal(15, 2)
+  mgmtCost    Decimal         @default(0) @db.Decimal(15, 2)
+  vat         Decimal         @default(0) @db.Decimal(15, 2)
+  totalAmount Decimal         @default(0) @db.Decimal(15, 2)
+
+  project           Project             @relation(fields: [projectId], references: [id])
+  boq               BOQ?                @relation(fields: [boqId], references: [id])
+  categories        QuotationCategory[]
+  paymentMilestones PaymentMilestone[]
+  subQuotations     SubQuotation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("quotations")
+}
+
+/// ใบเสนอราคาย่อย — แบ่งงวดจ่ายจากใบเสนอราคาหลัก (BOQ) โดยยอดรวมต้องไม่เกิน totalAmount ของ Quotation แม่
+model SubQuotation {
+  id          Int     @id @default(autoincrement())
+  /// auto-generated: SQ-YYYY-NNN
+  code        String  @unique
+  quotationId Int
+  title       String
+  description String?
+  amount      Decimal @default(0) @db.Decimal(15, 2)
+  sortOrder   Int     @default(0)
+
+  quotation         Quotation          @relation(fields: [quotationId], references: [id])
+  paymentMilestones PaymentMilestone[]
+  estimateItems     EstimateItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("sub_quotations")
+}
+
+model QuotationCategory {
+  id            Int     @id @default(autoincrement())
+  quotationId   Int
+  name          String
+  sortOrder     Int     @default(0)
+  totalAmount   Decimal @default(0) @db.Decimal(15, 2)
+
+  quotation     Quotation              @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  subCategories QuotationSubCategory[]
+
+  @@map("quotation_categories")
+}
+
+model QuotationSubCategory {
+  id          Int     @id @default(autoincrement())
+  categoryId  Int
+  name        String
+  sortOrder   Int     @default(0)
+  totalAmount Decimal @default(0) @db.Decimal(15, 2)
+
+  category QuotationCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@map("quotation_sub_categories")
+}
+
+// =============================================================================
+// APPROVAL
+// =============================================================================
+
+model Approval {
+  id              Int            @id @default(autoincrement())
+  projectId       Int?
+  userId          Int
+  status          ApprovalStatus @default(PENDING)
+  note            String?
+  designTaskId    Int?
+  boqId           Int?
+  changeRequestId Int?
+  approvedAt      DateTime?
+
+  project       Project?       @relation(fields: [projectId], references: [id])
+  user          User           @relation(fields: [userId], references: [id])
+  designTask    DesignTask?    @relation(fields: [designTaskId], references: [id])
+  boq           BOQ?           @relation(fields: [boqId], references: [id])
+  changeRequest ChangeRequest? @relation(fields: [changeRequestId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("approvals")
+}
+
+// =============================================================================
+// ACTIVITY LOG
+// =============================================================================
+
+model ActivityLog {
+  id          Int     @id @default(autoincrement())
+  userId      Int?
+  /// เช่น project.created, status.changed, payment.paid
+  action      String
+  /// เช่น project, estimate, boq, payment
+  module      String
+  refId       Int?
+  description String?
+
+  createdAt DateTime @default(now())
+
+  @@map("activity_logs")
 }

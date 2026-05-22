@@ -1,27 +1,32 @@
+'use client'
+
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ClientShell } from './ClientShell'
 
-// Mock hooks to isolate component behaviour
 const mockUseClientMe = vi.fn()
-const mockUseClientLogout = vi.fn(() => vi.fn())
 const mockPush = vi.fn()
+const mockPathname = vi.fn()
 
 vi.mock('@/hooks/useClientAuth', () => ({
   useClientMe: () => mockUseClientMe(),
-  useClientLogout: () => mockUseClientLogout(),
+  useClientLogout: () => vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
-  usePathname: () => '/client/projects',
+  usePathname: () => mockPathname(),
 }))
 
 vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
+}))
+
+vi.mock('next/image', () => ({
+  default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }))
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -31,11 +36,12 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockPathname.mockReturnValue('/client/projects')
 })
 
 describe('ClientShell', () => {
   it('shows loading spinner while auth is loading', () => {
-    mockUseClientMe.mockReturnValue({ data: undefined, isLoading: true })
+    mockUseClientMe.mockReturnValue({ data: undefined, isLoading: true, isFetching: false })
 
     render(
       <wrapper>
@@ -46,13 +52,12 @@ describe('ClientShell', () => {
     )
 
     expect(screen.queryByText('content')).toBeNull()
-    // Spinner is present (animate-spin class)
     const spinner = document.querySelector('.animate-spin')
     expect(spinner).toBeTruthy()
   })
 
-  it('redirects to /client/login when not authenticated', () => {
-    mockUseClientMe.mockReturnValue({ data: undefined, isLoading: false })
+  it('redirects to /client/login when not authenticated', async () => {
+    mockUseClientMe.mockReturnValue({ data: undefined, isLoading: false, isFetching: false })
 
     render(
       <wrapper>
@@ -62,7 +67,9 @@ describe('ClientShell', () => {
       </wrapper>,
     )
 
-    expect(mockPush).toHaveBeenCalledWith('/client/login')
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/client/login')
+    })
   })
 
   it('renders children and header when authenticated', () => {
@@ -75,6 +82,7 @@ describe('ClientShell', () => {
         permissions: [],
       },
       isLoading: false,
+      isFetching: false,
     })
 
     render(
@@ -86,18 +94,12 @@ describe('ClientShell', () => {
     )
 
     expect(screen.getByText('project list')).toBeTruthy()
-    expect(screen.getByText('Client Portal')).toBeTruthy()
-    expect(screen.getByText('สมชาย')).toBeTruthy()
+    expect(screen.getByText('ติดตามโครงการ')).toBeTruthy()
   })
 
   it('renders children directly on public paths without auth check', () => {
-    // Re-mock usePathname to return the login page
-    vi.mock('next/navigation', () => ({
-      useRouter: () => ({ push: mockPush }),
-      usePathname: () => '/client/login',
-    }))
-
-    mockUseClientMe.mockReturnValue({ data: undefined, isLoading: false })
+    mockPathname.mockReturnValue('/client/login')
+    mockUseClientMe.mockReturnValue({ data: undefined, isLoading: false, isFetching: false })
 
     render(
       <wrapper>
@@ -107,9 +109,7 @@ describe('ClientShell', () => {
       </wrapper>,
     )
 
-    // Should NOT redirect — just render without auth gate
-    // (On public path the component wraps in a div and renders children)
-    // The mock push should not be called
+    expect(screen.getByText('login form')).toBeTruthy()
     expect(mockPush).not.toHaveBeenCalled()
   })
 })

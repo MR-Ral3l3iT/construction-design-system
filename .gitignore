@@ -41,6 +41,14 @@ coverage/
 # Prisma
 backend/prisma/migrations/*.sql.bak
 
+# Compiled output of ts-node scripts run in place
+backend/prisma/*.js
+backend/prisma/*.js.map
+backend/prisma/*.d.ts
+backend/scripts/*.js
+backend/scripts/*.js.map
+backend/scripts/*.d.ts
+
 # Uploads (local dev)
 backend/uploads/
 

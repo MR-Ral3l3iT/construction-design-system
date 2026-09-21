@@ -1,23 +1,24 @@
 # Spec ระบบออกบิล บัญชี และการเงิน (Billing & Accounting)
 
-> สถานะ: Draft **v2.1** — ยืนยันเลขที่ 3 หลัก และขอบเขตบริษัทเดียว (แยกขาดจาก KK)
+> สถานะ: **v2.2 — Phase 1 สร้างเสร็จและทดสอบแล้ว**
+> อัปเดตให้ตรงกับโค้ดที่ implement จริง (ดู §13 สำหรับสถานะแต่ละ phase)
 > ขอบเขต: ออกเอกสารภาษีเต็มรูปแบบตามประมวลรัษฎากร + AR + AP + งบกำไรขาดทุนรายโครงการ
 
 ---
 
 ## 1. ขอบเขตและมติที่ล็อกแล้ว
 
-| หัวข้อ | มติ |
-|---|---|
-| ระดับความถูกต้องทางภาษี | เต็มรูปแบบ — ใบกำกับภาษี, ภ.พ.30, ภ.ง.ด.3/53, 50 ทวิ |
-| ขอบเขตการเงิน | AR + AP + P&L รายโครงการ (รายได้ / ทุน / รายจ่าย Vendor) |
-| ความสัมพันธ์กับ BOQ | **ยังไม่เชื่อม** — ทุนมาจากรายจ่ายที่บันทึกจริงและผูก `projectId` |
-| เอกสารเดิมใน `/print/billing` | ไม่ย้าย ไม่ migrate — เริ่มนับเลขใหม่ |
-| รูปแบบเลขที่ | `{PREFIX}{YY}{MM}{NNN}` — running **3 หลัก** reset ทุกเดือน (ต่างจาก KK ที่ใช้ 4 หลักโดยตั้งใจ) |
-| บริษัทผู้ออกเอกสาร | **บริษัท ฃวด จำกัด (UAT) รายเดียว** — ไม่รองรับหลายบริษัท |
-| ความสัมพันธ์กับระบบ KK | **แยกขาดจากกัน** — ไม่แชร์ข้อมูล ไม่ sync ไม่รวมรายงาน |
-| หัก ณ ที่จ่าย | ผู้ออกเอกสารเลือกเปิด/ปิดและเลือกอัตราเองทุกใบ (มีค่าตั้งต้น inherit มาให้) |
-| e-Tax Invoice | ไม่อยู่ในขอบเขตรอบนี้ (ออกแบบให้ต่อยอดได้) |
+| หัวข้อ                        | มติ                                                                                             |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| ระดับความถูกต้องทางภาษี       | เต็มรูปแบบ — ใบกำกับภาษี, ภ.พ.30, ภ.ง.ด.3/53, 50 ทวิ                                            |
+| ขอบเขตการเงิน                 | AR + AP + P&L รายโครงการ (รายได้ / ทุน / รายจ่าย Vendor)                                        |
+| ความสัมพันธ์กับ BOQ           | **ยังไม่เชื่อม** — ทุนมาจากรายจ่ายที่บันทึกจริงและผูก `projectId`                               |
+| เอกสารเดิมใน `/print/billing` | ไม่ย้าย ไม่ migrate — เริ่มนับเลขใหม่                                                           |
+| รูปแบบเลขที่                  | `{PREFIX}{YY}{MM}{NNN}` — running **3 หลัก** reset ทุกเดือน (ต่างจาก KK ที่ใช้ 4 หลักโดยตั้งใจ) |
+| บริษัทผู้ออกเอกสาร            | **บริษัท ฃวด จำกัด (UAT) รายเดียว** — ไม่รองรับหลายบริษัท                                       |
+| ความสัมพันธ์กับระบบ KK        | **แยกขาดจากกัน** — ไม่แชร์ข้อมูล ไม่ sync ไม่รวมรายงาน                                          |
+| หัก ณ ที่จ่าย                 | ผู้ออกเอกสารเลือกเปิด/ปิดและเลือกอัตราเองทุกใบ (มีค่าตั้งต้น inherit มาให้)                     |
+| e-Tax Invoice                 | ไม่อยู่ในขอบเขตรอบนี้ (ออกแบบให้ต่อยอดได้)                                                      |
 
 ---
 
@@ -31,26 +32,26 @@
 
 ### สิ่งที่รับมาใช้
 
-| แนวคิดจาก KK | ทำไมถึงดีกว่าที่ v1 ออกแบบไว้ |
-|---|---|
-| **ตาราง `Document` รวมทุกประเภทเอกสาร** | v1 แยก 6 ตาราง (Invoice/BillingNote/Receipt/CreditNote/...) → ต้องเขียน numbering, lifecycle, PDF pipeline, หน้า list ซ้ำ 6 รอบ KK ใช้ตารางเดียว + `doc_type` discriminator จบในที่เดียว |
-| **`Transaction` เป็นสมุดบัญชีกลาง** | v1 ไม่มีชั้นนี้เลย ทำให้ P&L ต้องไปไล่ sum จากหลายตาราง KK ใช้ 3 มิติ (`account_id` × `project_id` × `vendor_id`) query ข้ามมิติได้หมด |
-| **`ChartOfAccount` ผังบัญชี** | ทำให้จัดหมวดรายรับ-รายจ่ายได้จริง และส่งงบให้สำนักงานบัญชีได้ตรงรูปแบบ |
-| **สาย revision `-R1` + `supersedes_doc_id` + `root_doc_id`** | งานก่อสร้างแก้ใบเสนอราคาบ่อยมาก และฝ่ายจัดซื้อลูกค้ามัก mark เลข QT เดิมไว้ใน PO แล้ว |
-| **จำกัด revision เฉพาะ QUOTATION** | เอกสารภาษีต้องมีเลขรันเดี่ยว แก้ต้องยกเลิกแล้วออกใหม่ — ตรงกับหลักการ §3.2 |
-| **`WhtRate` เป็นตารางพร้อมอ้างมาตรา** | v1 ใช้ enum แข็ง KK ใช้ตาราง seed ได้ ปรับอัตราตอนกฎหมายเปลี่ยนได้โดยไม่ต้อง migrate |
-| **อัตราภาษี inherit: Project → Milestone → Document** | ลดการกรอกซ้ำและลดโอกาสกรอกผิด override ได้ทุกชั้น |
-| **`docToTxAuto` — เฉพาะเอกสารที่เงินขยับจริงจึงสร้าง Transaction** | QT/IV/BN ไม่สร้าง, RC/PV/RV/WHT สร้าง — ตรงกับหลักจุดความรับผิด VAT ใน §3.1 พอดี |
-| **แนวคิด running number ต่อเดือน** | รับแนวคิดมา แต่ใช้ **3 หลัก** (KK ใช้ 4) — เพดาน 999 ใบ/เดือน/ประเภท เพียงพอและเลขสั้นกว่า |
+| แนวคิดจาก KK                                                       | ทำไมถึงดีกว่าที่ v1 ออกแบบไว้                                                                                                                                                            |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ตาราง `Document` รวมทุกประเภทเอกสาร**                            | v1 แยก 6 ตาราง (Invoice/BillingNote/Receipt/CreditNote/...) → ต้องเขียน numbering, lifecycle, PDF pipeline, หน้า list ซ้ำ 6 รอบ KK ใช้ตารางเดียว + `doc_type` discriminator จบในที่เดียว |
+| **`Transaction` เป็นสมุดบัญชีกลาง**                                | v1 ไม่มีชั้นนี้เลย ทำให้ P&L ต้องไปไล่ sum จากหลายตาราง KK ใช้ 3 มิติ (`account_id` × `project_id` × `vendor_id`) query ข้ามมิติได้หมด                                                   |
+| **`ChartOfAccount` ผังบัญชี**                                      | ทำให้จัดหมวดรายรับ-รายจ่ายได้จริง และส่งงบให้สำนักงานบัญชีได้ตรงรูปแบบ                                                                                                                   |
+| **สาย revision `-R1` + `supersedes_doc_id` + `root_doc_id`**       | งานก่อสร้างแก้ใบเสนอราคาบ่อยมาก และฝ่ายจัดซื้อลูกค้ามัก mark เลข QT เดิมไว้ใน PO แล้ว                                                                                                    |
+| **จำกัด revision เฉพาะ QUOTATION**                                 | เอกสารภาษีต้องมีเลขรันเดี่ยว แก้ต้องยกเลิกแล้วออกใหม่ — ตรงกับหลักการ §3.2                                                                                                               |
+| **`WhtRate` เป็นตารางพร้อมอ้างมาตรา**                              | v1 ใช้ enum แข็ง KK ใช้ตาราง seed ได้ ปรับอัตราตอนกฎหมายเปลี่ยนได้โดยไม่ต้อง migrate                                                                                                     |
+| **อัตราภาษี inherit: Project → Milestone → Document**              | ลดการกรอกซ้ำและลดโอกาสกรอกผิด override ได้ทุกชั้น                                                                                                                                        |
+| **`docToTxAuto` — เฉพาะเอกสารที่เงินขยับจริงจึงสร้าง Transaction** | QT/IV/BN ไม่สร้าง, RC/PV/RV/WHT สร้าง — ตรงกับหลักจุดความรับผิด VAT ใน §3.1 พอดี                                                                                                         |
+| **แนวคิด running number ต่อเดือน**                                 | รับแนวคิดมา แต่ใช้ **3 หลัก** (KK ใช้ 4) — เพดาน 999 ใบ/เดือน/ประเภท เพียงพอและเลขสั้นกว่า                                                                                               |
 
 ### สิ่งที่ไม่รับมาและเหตุผล
 
-| ของ KK | เหตุผลที่ไม่ใช้ตรง ๆ |
-|---|---|
+| ของ KK                                    | เหตุผลที่ไม่ใช้ตรง ๆ                                                                                                                                                        |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | เก็บรายการสินค้าใน `form_data` JSONB ล้วน | รายงานภาษีขาย/ซื้อและ P&L ต้อง query ระดับบรรทัด JSONB ทำให้ index และ join ยาก — ใช้ **ตาราง `DocumentItem` แบบ typed** แทน แล้วเก็บ `formData` ไว้เฉพาะ layout ของใบพิมพ์ |
-| `nextDocNumber()` อ่าน max แล้ว +1 | มี race condition ถ้าออกเอกสารพร้อมกันสองคน — ใช้ `DocumentSequence` + `SELECT ... FOR UPDATE` แทน (§5.3) |
-| `calcTax()` คำนวณด้วย `number` | ใช้ `Prisma.Decimal` ตลอด (§3.4) |
-| ตาราง `payments` แยกจาก transaction | โปรเจกต์นี้มี `PaymentMilestone` อยู่แล้ว ใช้ `TransactionPayment` ผูกกับ transaction พอ |
+| `nextDocNumber()` อ่าน max แล้ว +1        | มี race condition ถ้าออกเอกสารพร้อมกันสองคน — ใช้ `DocumentSequence` + `SELECT ... FOR UPDATE` แทน (§5.3)                                                                   |
+| `calcTax()` คำนวณด้วย `number`            | ใช้ `Prisma.Decimal` ตลอด (§3.4)                                                                                                                                            |
+| ตาราง `payments` แยกจาก transaction       | โปรเจกต์นี้มี `PaymentMilestone` อยู่แล้ว ใช้ `TransactionPayment` ผูกกับ transaction พอ                                                                                    |
 
 ---
 
@@ -167,11 +168,11 @@ Transaction        รายการบัญชี         สมุดบั�
 
 UAT ใช้ **3 หลัก** ต่างจาก KK ที่ใช้ 4 หลักโดยตั้งใจ — สองระบบแยกขาดจากกันจึงไม่จำเป็นต้องใช้รูปแบบเดียวกัน
 
-| | เพดาน/เดือน/ประเภท | ความยาว |
-|---|---|---|
-| 2 หลัก (แนวคิดแรก) | 99 | `IV260920` |
-| **3 หลัก (มติ)** | **999** | `IV2609020` |
-| 4 หลัก (KK) | 9,999 | `IV26090020` |
+|                    | เพดาน/เดือน/ประเภท | ความยาว      |
+| ------------------ | ------------------ | ------------ |
+| 2 หลัก (แนวคิดแรก) | 99                 | `IV260920`   |
+| **3 หลัก (มติ)**   | **999**            | `IV2609020`  |
+| 4 หลัก (KK)        | 9,999              | `IV26090020` |
 
 999 ใบต่อเดือนต่อประเภทเพียงพอกับปริมาณงานของ ฃวด อย่างชัดเจน และได้เลขที่สั้นกว่า KK หนึ่งหลัก
 
@@ -181,39 +182,44 @@ UAT ใช้ **3 หลัก** ต่างจาก KK ที่ใช้ 4 �
 
 จ่ายเลขตอนเปลี่ยนสถานะเป็น `CONFIRMED` เท่านั้น เอกสาร `DRAFT` ยังไม่มีเลข
 
+implement แล้วที่ `backend/src/modules/company/document-sequence.service.ts`
+
 ```ts
-// document-sequence.service.ts — เรียกจากใน prisma.$transaction เสมอ
+// เรียกจากใน prisma.$transaction ของ caller เสมอ เพื่อให้เลขถูกคืนถ้ายืนยันล้มเหลวกลางคัน
 async next(tx: Prisma.TransactionClient, docType: DocType, at: Date): Promise<string> {
-  const period = `${yy(at)}${mm(at)}`            // "2609"
-  // KK อ่าน max แล้ว +1 ซึ่งชนกันได้ถ้าสองคนกด confirm พร้อมกัน — ล็อกแถวก่อน
-  await tx.$executeRaw`
-    SELECT id FROM document_sequences
-    WHERE doc_type = ${docType}::text AND period = ${period}
-    FOR UPDATE`
-  const seq = await tx.documentSequence.upsert({
-    where: { docType_period: { docType, period } },
-    create: { docType, period, currentNo: 1, digits: 3 },
-    update: { currentNo: { increment: 1 } },
-  })
-  return `${DOC_PREFIX[docType]}${period}${String(seq.currentNo).padStart(seq.digits, '0')}`
+  const period = buildPeriod(at)                 // "2609"
+  const rows = await tx.$queryRaw`
+    INSERT INTO "document_sequences" ("docType", "period", "currentNo", "digits", "createdAt", "updatedAt")
+    VALUES (${docType}::"DocType", ${period}, 1, 3, NOW(), NOW())
+    ON CONFLICT ("docType", "period")
+    DO UPDATE SET "currentNo" = "document_sequences"."currentNo" + 1, "updatedAt" = NOW()
+    RETURNING "currentNo", "digits"`
+  return formatDocNumber(docType, period, rows[0].currentNo, rows[0].digits)
 }
 ```
 
+ใช้ `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` ซึ่ง Postgres รับประกันว่า atomic
+ในคำสั่งเดียว **ดีกว่าที่ v2 ร่างไว้เป็น `SELECT ... FOR UPDATE` + upsert** เพราะ
+`FOR UPDATE` ล็อกแถวที่ยังไม่มีอยู่ไม่ได้ — ใบแรกของเดือนจะยังชนกันได้
+
 ชั้นกันพลาดที่สอง: `@@unique` บน `Document.code`
+
+**ทดสอบแล้ว** (`document-sequence.service.spec.ts`) — ยิง 60 ครั้งพร้อมกันบน Postgres จริง
+ได้เลขไม่ซ้ำและต่อเนื่อง 001–060 ครบ, rollback คืนเลขได้, แต่ละประเภทนับแยก, ขึ้นเดือนใหม่ reset
 
 ### 5.4 ประเภทเอกสารและ prefix — ตามชุดของ KK
 
-| DocType | Prefix | เอกสาร | สร้าง Transaction | Revision ได้ |
-|---|---|---|---|---|
-| `QUOTATION` | `QT` | ใบเสนอราคา | — | ✓ |
-| `INVOICE` | `IV` | ใบแจ้งหนี้ | — | — |
-| `BILLING` | `BN` | ใบวางบิล | — | — |
-| `RECEIPT` | `RC` | ใบเสร็จรับเงิน/ใบกำกับภาษี | ✓ INCOME | — |
-| `PAYMENT_VOUCHER` | `PV` | ใบสำคัญจ่าย | ✓ EXPENSE | — |
-| `RECEIPT_VOUCHER` | `RV` | ใบสำคัญรับ | ✓ INCOME | — |
-| `WHT_CERT` | `WHT` | หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) | ✓ EXPENSE | — |
-| `CREDIT_NOTE` | `CN` | ใบลดหนี้ | ✓ INCOME (ติดลบ) | — |
-| `DEBIT_NOTE` | `DN` | ใบเพิ่มหนี้ | ✓ INCOME | — |
+| DocType           | Prefix | เอกสาร                              | สร้าง Transaction | Revision ได้ |
+| ----------------- | ------ | ----------------------------------- | ----------------- | ------------ |
+| `QUOTATION`       | `QT`   | ใบเสนอราคา                          | —                 | ✓            |
+| `INVOICE`         | `IV`   | ใบแจ้งหนี้                          | —                 | —            |
+| `BILLING`         | `BN`   | ใบวางบิล                            | —                 | —            |
+| `RECEIPT`         | `RC`   | ใบเสร็จรับเงิน/ใบกำกับภาษี          | ✓ INCOME          | —            |
+| `PAYMENT_VOUCHER` | `PV`   | ใบสำคัญจ่าย                         | ✓ EXPENSE         | —            |
+| `RECEIPT_VOUCHER` | `RV`   | ใบสำคัญรับ                          | ✓ INCOME          | —            |
+| `WHT_CERT`        | `WHT`  | หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) | ✓ EXPENSE         | —            |
+| `CREDIT_NOTE`     | `CN`   | ใบลดหนี้                            | ✓ INCOME (ติดลบ)  | —            |
+| `DEBIT_NOTE`      | `DN`   | ใบเพิ่มหนี้                         | ✓ INCOME          | —            |
 
 `CN`/`DN` เป็นส่วนที่เพิ่มจากชุดของ KK เพราะสเปคนี้ต้องรองรับภาษีเต็มรูปแบบ
 
@@ -905,28 +911,28 @@ model FileAsset {
 
 ### 7.1 Document lifecycle
 
-| การกระทำ | กฎ |
-|---|---|
-| `create` | สร้างเป็น `DRAFT` ยังไม่มีเลขที่ แก้ไขได้เต็มที่ |
+| การกระทำ  | กฎ                                                                                                                     |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `create`  | สร้างเป็น `DRAFT` ยังไม่มีเลขที่ แก้ไขได้เต็มที่                                                                       |
 | `confirm` | ใน transaction เดียว: จ่ายเลข → snapshot ผู้ขาย/คู่สัญญา → ตรึงยอด → ถ้าเป็น money-flow doc สร้าง `Transaction` (§7.2) |
-| `update` | เฉพาะ `DRAFT` สถานะอื่นแก้ได้แค่ `internalNote` |
-| `void` | ต้องระบุเหตุผล คงเลขที่ไว้ ถ้ามี transaction ผูกอยู่ต้อง void transaction ด้วยใน transaction เดียวกัน |
-| `reissue` | ออกใบใหม่เลขใหม่ ชี้ `supersedesDocId` กลับใบเก่า ใบเก่า → `SUPERSEDED` |
-| `revise` | เฉพาะ `QUOTATION` — เลขฐานเดิม + `-R{n}`, `rootDocId` ชี้ใบต้นฉบับ, `revisionNo` +1 |
+| `update`  | เฉพาะ `DRAFT` สถานะอื่นแก้ได้แค่ `internalNote`                                                                        |
+| `void`    | ต้องระบุเหตุผล คงเลขที่ไว้ ถ้ามี transaction ผูกอยู่ต้อง void transaction ด้วยใน transaction เดียวกัน                  |
+| `reissue` | ออกใบใหม่เลขใหม่ ชี้ `supersedesDocId` กลับใบเก่า ใบเก่า → `SUPERSEDED`                                                |
+| `revise`  | เฉพาะ `QUOTATION` — เลขฐานเดิม + `-R{n}`, `rootDocId` ชี้ใบต้นฉบับ, `revisionNo` +1                                    |
 
 ### 7.2 กฎการสร้าง Transaction อัตโนมัติ
 
 ยึดตาม `MONEY_FLOW_DOC_TYPES` ของ KK — เอกสารก่อนเงินขยับไม่สร้าง transaction
 
-| DocType | Transaction | type | category |
-|---|---|---|---|
-| `QUOTATION` / `INVOICE` / `BILLING` | ไม่สร้าง | — | — |
-| `RECEIPT` | สร้าง | `INCOME` | `PROJECT` ถ้ามี projectId, ไม่งั้น `OTHER_INCOME` |
-| `RECEIPT_VOUCHER` | สร้าง | `INCOME` | `OTHER_INCOME` |
-| `PAYMENT_VOUCHER` | สร้าง | `EXPENSE` | `PROJECT` ถ้ามี projectId, ไม่งั้น `OFFICE` |
-| `WHT_CERT` | สร้าง | `EXPENSE` | `TAX` |
-| `CREDIT_NOTE` | สร้าง | `INCOME` (ยอดติดลบ) | ตามใบต้นฉบับ |
-| `DEBIT_NOTE` | สร้าง | `INCOME` | ตามใบต้นฉบับ |
+| DocType                             | Transaction | type                | category                                          |
+| ----------------------------------- | ----------- | ------------------- | ------------------------------------------------- |
+| `QUOTATION` / `INVOICE` / `BILLING` | ไม่สร้าง    | —                   | —                                                 |
+| `RECEIPT`                           | สร้าง       | `INCOME`            | `PROJECT` ถ้ามี projectId, ไม่งั้น `OTHER_INCOME` |
+| `RECEIPT_VOUCHER`                   | สร้าง       | `INCOME`            | `OTHER_INCOME`                                    |
+| `PAYMENT_VOUCHER`                   | สร้าง       | `EXPENSE`           | `PROJECT` ถ้ามี projectId, ไม่งั้น `OFFICE`       |
+| `WHT_CERT`                          | สร้าง       | `EXPENSE`           | `TAX`                                             |
+| `CREDIT_NOTE`                       | สร้าง       | `INCOME` (ยอดติดลบ) | ตามใบต้นฉบับ                                      |
+| `DEBIT_NOTE`                        | สร้าง       | `INCOME`            | ตามใบต้นฉบับ                                      |
 
 ต้อง **idempotent** — ถ้า `document.transactionId` มีค่าแล้วให้คืนตัวเดิม ไม่สร้างซ้ำ (KK ทำแบบนี้และถูกต้อง)
 
@@ -1023,13 +1029,13 @@ Margin %      = กำไรขั้นต้น ÷ รายได้ × 100
 
 ## 9. Withholding Tax Rates เริ่มต้น
 
-| code | rate | มาตรา | คำอธิบาย |
-|---|---|---|---|
-| `WHT0` | 0% | — | ไม่หัก ณ ที่จ่าย |
-| `WHT1` | 1% | 40(8) | ค่าขนส่ง |
-| `WHT2` | 2% | 40(8) | ค่าโฆษณา |
-| `WHT3` | 3% | 40(7)(8) | ค่าจ้างทำของ / ค่ารับเหมา / ค่าบริการ |
-| `WHT5` | 5% | 40(5)(6) | ค่าเช่าทรัพย์สิน |
+| code   | rate | มาตรา    | คำอธิบาย                              |
+| ------ | ---- | -------- | ------------------------------------- |
+| `WHT0` | 0%   | —        | ไม่หัก ณ ที่จ่าย                      |
+| `WHT1` | 1%   | 40(8)    | ค่าขนส่ง                              |
+| `WHT2` | 2%   | 40(8)    | ค่าโฆษณา                              |
+| `WHT3` | 3%   | 40(7)(8) | ค่าจ้างทำของ / ค่ารับเหมา / ค่าบริการ |
+| `WHT5` | 5%   | 40(5)(6) | ค่าเช่าทรัพย์สิน                      |
 
 ---
 
@@ -1038,11 +1044,15 @@ Margin %      = กำไรขั้นต้น ÷ รายได้ × 100
 ```
 # Settings
 GET|PUT    /company                        โปรไฟล์บริษัท (แถวเดียว ไม่มี selector)
-GET|POST   /company/:id/bank-accounts
-GET|POST   /chart-of-accounts              ผังบัญชี
-GET        /wht-rates                      dropdown
-GET|POST   /fiscal-periods                 ปิดงวด
-GET        /document-sequences             ดูเลขล่าสุด (read-only)
+GET|POST   /company/bank-accounts          (ไม่มี :id เพราะมีบริษัทเดียว)
+PATCH|DELETE /company/bank-accounts/:id
+GET        /chart-of-accounts              ผังบัญชีแบบ tree
+GET        /chart-of-accounts/options      รายการแบนสำหรับ dropdown
+POST|PATCH|DELETE /chart-of-accounts[/:id]
+GET|POST   /wht-rates  |  PATCH /wht-rates/:id
+GET        /fiscal-periods
+POST       /fiscal-periods/close  |  POST /fiscal-periods/:id/reopen
+GET        /document-sequences             ดูเลขล่าสุดและเลขถัดไป (read-only)
 
 # Documents — endpoint เดียวครอบทุกประเภท
 POST       /documents                      สร้าง DRAFT { docType, ... }
@@ -1117,13 +1127,13 @@ GET /accounting/reports/project-budget-vs-actual   ?projectId=
 { key: 'accounting.close',    name: 'ปิดงวดบัญชี',        group: 'accounting' },
 ```
 
-| Role | สิทธิ์ |
-|---|---|
-| `ADMIN` | ทั้งหมด |
-| `ACCOUNTANT` | ทั้งหมดในกลุ่ม billing / ap / accounting |
+| Role              | สิทธิ์                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ADMIN`           | ทั้งหมด                                                                                                       |
+| `ACCOUNTANT`      | ทั้งหมดในกลุ่ม billing / ap / accounting                                                                      |
 | `PROJECT_MANAGER` | `document.view`, `transaction.view`, `transaction.create`, `vendor.view`, `apcontract.*`, `accounting.report` |
-| `SALE` | `document.view`, `document.create` |
-| `CUSTOMER` | `document.view` — กรองเฉพาะของตัวเองผ่าน Client Portal |
+| `SALE`            | `document.view`, `document.create`                                                                            |
+| `CUSTOMER`        | `document.view` — กรองเฉพาะของตัวเองผ่าน Client Portal                                                        |
 
 ---
 
@@ -1189,32 +1199,126 @@ nav ใหม่ใน `frontend/src/components/admin/adminNav.ts`:
 
 ## 13. แผนการพัฒนา
 
-| Phase | ขอบเขต | ผลลัพธ์ที่ตรวจรับได้ |
-|---|---|---|
-| **1** | Foundation | migration + `company` module + ผังบัญชี + อัตรา WHT + หน้าตั้งค่า + `DocumentSequenceService` พร้อม test concurrency + permission ใหม่ |
-| **2** | Document core + IV | สร้างใบแจ้งหนี้จากงวดเงิน → confirm → พิมพ์ได้ + หน้า list/detail + `print/document/[id]` |
-| **3** | RC + Transaction | ออกใบเสร็จ/ใบกำกับภาษี, ตัดยอด IV, รับชำระบางส่วน/หลายช่องทาง, auto-create Transaction, status ไหลถึง `PaymentMilestone`, บันทึก 50 ทวิ ที่รับมา |
-| **4** | BN + CN/DN + revision | ใบวางบิลรวมหลาย IV, ใบลดหนี้/เพิ่มหนี้, สาย reissue/revision |
-| **5** | AP | Vendor + VendorContract + VendorMilestone + Transaction ฝั่งจ่าย + PV + ออก 50 ทวิ ให้ vendor |
-| **6** | รายงาน | AR/AP aging, ภาษีขาย/ซื้อ, ภ.พ.30, ภ.ง.ด.3/53, งบกำไรขาดทุน, cash flow, P&L รายโครงการ, budget vs actual, export CSV |
-| **7** | เก็บงาน | nav + สิทธิ์ ACCOUNTANT + Client Portal ดูเอกสารของตัวเอง + ส่งอีเมลผ่าน `MailModule` ที่มีอยู่ + ปิดงวดบัญชี |
+| Phase    | ขอบเขต                | ผลลัพธ์ที่ตรวจรับได้                                                                                                                             |
+| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1** ✅ | Foundation            | **เสร็จแล้ว** — ดู §13.1                                                                                                                         |
+| **2**    | Document core + IV    | สร้างใบแจ้งหนี้จากงวดเงิน → confirm → พิมพ์ได้ + หน้า list/detail + `print/document/[id]` + **Raw Editor** (§13.2)                               |
+| **3**    | RC + Transaction      | ออกใบเสร็จ/ใบกำกับภาษี, ตัดยอด IV, รับชำระบางส่วน/หลายช่องทาง, auto-create Transaction, status ไหลถึง `PaymentMilestone`, บันทึก 50 ทวิ ที่รับมา |
+| **4**    | BN + CN/DN + revision | ใบวางบิลรวมหลาย IV, ใบลดหนี้/เพิ่มหนี้, สาย reissue/revision                                                                                     |
+| **5**    | AP                    | Vendor + VendorContract + VendorMilestone + Transaction ฝั่งจ่าย + PV + ออก 50 ทวิ ให้ vendor                                                    |
+| **6**    | รายงาน                | AR/AP aging, ภาษีขาย/ซื้อ, ภ.พ.30, ภ.ง.ด.3/53, งบกำไรขาดทุน, cash flow, P&L รายโครงการ, budget vs actual, export CSV                             |
+| **7**    | เก็บงาน               | nav + สิทธิ์ ACCOUNTANT + Client Portal ดูเอกสารของตัวเอง + ส่งอีเมลผ่าน `MailModule` ที่มีอยู่ + ปิดงวดบัญชี                                    |
 
-Phase 1–3 เป็น critical path — เลขที่เอกสาร snapshot และกฎ auto-transaction ต้องถูกตั้งแต่ใบแรก แก้ย้อนหลังไม่ได้
+Phase 2–3 เป็น critical path ที่เหลือ — snapshot และกฎ auto-transaction ต้องถูกตั้งแต่ใบแรก แก้ย้อนหลังไม่ได้
+
+### 13.1 Phase 1 — สิ่งที่ส่งมอบแล้ว
+
+**Database**
+
+- `backend/prisma/migrations/20260921000001_add_accounting_foundation/` — 6 ตาราง 2 enum
+- `CompanyProfile`, `BankAccount`, `DocumentSequence`, `ChartOfAccount`, `WhtRate`, `FiscalPeriod`
+
+**Backend** — `backend/src/modules/company/`
+
+- `document-sequence.service.ts` — จ่ายเลขแบบ atomic + `peek()` + `listCurrent()`
+- `company.service.ts` — โปรไฟล์บริษัท (singleton) + บัญชีธนาคาร พร้อมกฎบัญชีหลัก
+- `accounting-settings.service.ts` — ผังบัญชี (tree, กันวนลูป), อัตรา WHT, ปิด/เปิดงวดบัญชี
+- `backend/src/common/utils/money.util.ts` — `calcTax()` / `round2()` ด้วย `Prisma.Decimal`
+- 4 controller, 15 permission ใหม่, ผูกสิทธิ์ให้ ADMIN / ACCOUNTANT / PROJECT_MANAGER / SALE / CUSTOMER
+
+**Seed**
+
+- บริษัท ฃวด จำกัด + บัญชีกสิกรไทย (ย้ายออกจาก hardcode ในหน้า print)
+- ผังบัญชี 36 บัญชี (6 หมวดหลัก) สำหรับงานออกแบบและก่อสร้าง
+- อัตรา WHT 5 รายการพร้อมอ้างมาตรา
+
+**Frontend** — `/admin/settings/company`
+
+- 5 แท็บ: ข้อมูลบริษัท · บัญชีธนาคาร · ผังบัญชี · หัก ณ ที่จ่าย · เลขที่เอกสาร
+- hooks `useCompany.ts`, `useAccountingSettings.ts` + เมนูใน `adminNav.ts`
+
+**ผลการทดสอบ**
+| รายการ | ผล |
+|---|---|
+| `tsc --noEmit` backend / frontend | ผ่านทั้งคู่ ไม่มี error |
+| `eslint` ไฟล์ใหม่ทั้งหมด | ผ่าน |
+| `prisma migrate deploy` (Postgres 16 จริง) | migration ใหม่ apply สำเร็จ |
+| `prisma db seed` | ลงข้อมูลครบ ตรวจยืนยันด้วย SQL แล้ว |
+| `jest` ทั้ง repo | 5 suite · 38 ผ่าน · 6 skip (DB test ที่ข้ามเมื่อไม่ตั้ง `TEST_DATABASE_URL`) |
+| จ่ายเลขพร้อมกัน 60 transaction | ไม่ซ้ำ ต่อเนื่อง 001–060 ครบ |
+
+รัน DB test ด้วย: `TEST_DATABASE_URL=postgresql://... pnpm test document-sequence`
+
+---
+
+### 13.2 Raw Editor — ฟีเจอร์ที่ยกมาจาก KK (Phase 2)
+
+อ้างอิง `app/admin/(dashboard)/accounting/documents/components/DescriptionsRawEditor.tsx` ของ KK
+
+ฟอร์มกรอกรายการทีละบรรทัดใช้เวลานานเมื่อขอบเขตงานยาว — Raw Editor เปิด modal ที่แก้
+รายละเอียดทั้งกลุ่มเป็นข้อความก้อนเดียว **1 บรรทัด = 1 รายการ** วางลิสต์จากที่อื่นมาทีเดียวจบ
+
+พฤติกรรมที่ต้องคงไว้:
+
+- บรรทัดว่างถูกตัดทิ้ง
+- **เว้นวรรคหน้าบรรทัด = ระยะเยื้อง** (ใช้ space ไม่ใช่ tab เพราะ PDF ไม่มี tab stop)
+- ปุ่มเติม/เอา `-` ออกจากทุกบรรทัดในครั้งเดียว
+- รักษาตัวหนาของบรรทัดที่ผู้ใช้ไม่ได้แก้
+- **คลิกนอกกรอบและปุ่ม Escape ไม่ปิด modal** — ระหว่างพิมพ์ลิสต์ยาวการเผลอปิดแล้วงานหาย
+  เสียหายกว่าความสะดวกที่ได้ ปิดได้ทางปุ่มเท่านั้น และถามยืนยันถ้ายังมีที่แก้ค้าง
+
+ฝั่งนี้เก็บลง `DocumentItem` แบบ typed (ไม่ใช่ JSONB) ตาม §2 — ตัวช่วยแปลงข้อความ ↔ รายการ
+พอร์ตมาจาก `lib/docDescLines.ts` ของ KK
 
 ---
 
 ## 14. ความเสี่ยงและการรับมือ
 
-| # | ความเสี่ยง | การรับมือ |
-|---|---|---|
-| 1 | Race condition ตอนจ่ายเลข (KK มีปัญหานี้อยู่) | `SELECT ... FOR UPDATE` ใน transaction + `@@unique` บน `code` + integration test ยิงพร้อมกัน |
-| 2 | Transaction ถูกสร้างซ้ำตอน confirm สองครั้ง | ทำ idempotent — เช็ค `document.transactionId` ก่อนเสมอ |
-| 3 | void แล้ว `paidAmount` ไม่ rollback | ทุก mutation ที่แตะยอดอยู่ใน `$transaction` เดียว + reconcile job รายคืน |
-| 4 | ยอดปัดเศษไม่ตรงระหว่าง item กับ header | คำนวณจาก header ลงล่างเสมอ ห้ามรวม item ที่ปัดแล้วขึ้นเป็น header |
-| 5 | ผู้ใช้เข้าใจผิดว่า IV คือใบกำกับภาษี | พิมพ์ "ใบแจ้งหนี้ (ไม่ใช่ใบกำกับภาษี)" บนแบบฟอร์ม IV ชัดเจน |
-| 6 | `formData` JSONB ถูกใช้เก็บยอดเงินจนทำรายงานไม่ได้ | บังคับด้วย code review: ยอดเงินทุกตัวต้องอยู่ในคอลัมน์ typed เท่านั้น |
-| 7 | เอกสารเก่าจาก `/print/billing` ที่ส่งลูกค้าไปแล้ว | เก็บ route เดิม read-only ติดป้ายว่าระบบเก่า ถอดหลัง Phase 3 |
-| 8 | ข้อมูลบริษัท/บัญชีธนาคาร hardcode ในหน้า print เดิม | Phase 1 ย้ายเข้า DB ทันที |
+| #   | ความเสี่ยง                                                                                          | การรับมือ                                                                                    |
+| --- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 1   | Race condition ตอนจ่ายเลข (KK มีปัญหานี้อยู่)                                                       | `SELECT ... FOR UPDATE` ใน transaction + `@@unique` บน `code` + integration test ยิงพร้อมกัน |
+| 2   | Transaction ถูกสร้างซ้ำตอน confirm สองครั้ง                                                         | ทำ idempotent — เช็ค `document.transactionId` ก่อนเสมอ                                       |
+| 3   | void แล้ว `paidAmount` ไม่ rollback                                                                 | ทุก mutation ที่แตะยอดอยู่ใน `$transaction` เดียว + reconcile job รายคืน                     |
+| 4   | ยอดปัดเศษไม่ตรงระหว่าง item กับ header                                                              | คำนวณจาก header ลงล่างเสมอ ห้ามรวม item ที่ปัดแล้วขึ้นเป็น header                            |
+| 5   | ผู้ใช้เข้าใจผิดว่า IV คือใบกำกับภาษี                                                                | พิมพ์ "ใบแจ้งหนี้ (ไม่ใช่ใบกำกับภาษี)" บนแบบฟอร์ม IV ชัดเจน                                  |
+| 6   | `formData` JSONB ถูกใช้เก็บยอดเงินจนทำรายงานไม่ได้                                                  | บังคับด้วย code review: ยอดเงินทุกตัวต้องอยู่ในคอลัมน์ typed เท่านั้น                        |
+| 7   | เอกสารเก่าจาก `/print/billing` ที่ส่งลูกค้าไปแล้ว                                                   | เก็บ route เดิม read-only ติดป้ายว่าระบบเก่า ถอดหลัง Phase 3                                 |
+| 8   | ข้อมูลบริษัท/บัญชีธนาคาร hardcode ในหน้า print เดิม                                                 | ✅ Phase 1 ย้ายเข้า DB แล้ว                                                                  |
+| 9   | **schema drift ที่มีอยู่เดิม** — `prisma migrate deploy` จากศูนย์สร้าง DB ที่ไม่ตรง `schema.prisma` | ดู §14.1 — ต้องแก้ก่อน deploy ระบบใหม่ขึ้น production                                        |
+
+### 14.1 schema drift ที่พบระหว่างทดสอบ Phase 1
+
+ตรวจพบตอนรัน `prisma migrate deploy` บน Postgres เปล่า แล้ว `db seed` ล้มด้วย
+`The column projects.province does not exist`
+
+**ไม่เกี่ยวกับ Phase 1** — ตาราง 6 ตัวของ Phase 1 ไม่อยู่ใน drift เลย ตรวจยืนยันแล้ว
+
+สิ่งที่อยู่ใน `schema.prisma` แต่ไม่มี migration รองรับ (203 บรรทัด SQL):
+
+| ประเภท          | รายการ                                                                                                                                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ตารางที่หายไป   | `daily_reports`, `daily_report_items`, `daily_report_images`, `daily_report_issues`, `estimate_installments`, `sub_quotations`, `work_categories`                                                                                   |
+| คอลัมน์ที่หายไป | `projects` (province, district, subdistrict, postcode, addressLine, areaSize, latitude, longitude, designStartDate, designEndDate), `payment_milestones` (quotationId, subQuotationId, estimateId), `estimate_items.subQuotationId` |
+| enum ที่หายไป   | `DailyReportStatus`, `WeatherCondition`, `ReportIssueSeverity` ฯลฯ + ค่าใหม่ใน `FileCategory`, `ProjectType`                                                                                                                        |
+
+สาเหตุ: เคยใช้ `prisma db push` หรือ `migrate dev` แล้วไม่ได้ commit ไฟล์ migration
+
+**ผลกระทบ** — environment ที่มีอยู่ยังทำงานปกติเพราะ schema ถูก push เข้าไปแล้ว แต่
+**สร้าง environment ใหม่จาก migration ไม่ได้** ซึ่งกระทบทั้ง CI, staging และการ deploy ครั้งหน้า
+
+**วิธีแก้ที่แนะนำ** — สร้าง migration ชดเชยหนึ่งไฟล์จาก diff:
+
+```bash
+cd backend
+pnpm exec prisma migrate diff \
+  --from-migrations ./prisma/migrations \
+  --to-schema-datamodel ./prisma/schema.prisma \
+  --shadow-database-url "postgresql://...ฐานข้อมูลเปล่า..." \
+  --script > prisma/migrations/<timestamp>_backfill_schema_drift/migration.sql
+```
+
+แล้ว `prisma migrate resolve --applied <ชื่อ migration>` บน environment ที่มีข้อมูลอยู่แล้ว
+เพื่อบอกว่า migration นี้ถือว่า apply แล้ว ไม่ต้องรันซ้ำ
 
 ---
 

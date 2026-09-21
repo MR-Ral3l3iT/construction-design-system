@@ -1069,3 +1069,160 @@ model ActivityLog {
 
   @@map("activity_logs")
 }
+
+// =============================================================================
+// ACCOUNTING — FOUNDATION (Phase 1)
+// ดู docs/billing-accounting-spec.md
+// =============================================================================
+
+/// ประเภทเอกสารทางบัญชี — ใช้เป็น key ของ running number
+enum DocType {
+  QUOTATION
+  INVOICE
+  BILLING
+  RECEIPT
+  PAYMENT_VOUCHER
+  RECEIPT_VOUCHER
+  WHT_CERT
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+/// หมวดใหญ่ของผังบัญชี
+enum AccountType {
+  INCOME
+  EXPENSE
+  ASSET
+  LIABILITY
+  EQUITY
+}
+
+/// ข้อมูลบริษัทผู้ออกเอกสาร — ระบบนี้มีแถวเดียว (บริษัท ฃวด จำกัด)
+/// เก็บเป็นตารางแทน hardcode ใน JSX เพื่อให้แก้ที่อยู่/โลโก้/ลายเซ็นได้จากหน้าตั้งค่า
+/// ไม่มี company selector ใน UI — service ดึงแถว isDefault เสมอ
+model CompanyProfile {
+  id              Int     @id @default(autoincrement())
+  code            String  @unique
+  name            String
+  branchName      String  @default("สำนักงานใหญ่")
+  /// 00000 = สำนักงานใหญ่, 00001+ = สาขา
+  branchCode      String  @default("00000")
+  taxId           String?
+  address         String?
+  /// บรรทัดโทร/อีเมลที่พิมพ์บนหัวเอกสาร
+  contactLine     String?
+  phone           String?
+  email           String?
+  website         String?
+  logoUrl         String?
+  signatureUrl    String?
+  signatureName   String?
+  isVatRegistered Boolean @default(true)
+  defaultVatRate  Decimal @default(0.07) @db.Decimal(5, 4)
+  isDefault       Boolean @default(false)
+
+  bankAccounts BankAccount[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("company_profiles")
+}
+
+/// บัญชีธนาคารของบริษัท — พิมพ์บนใบวางบิล/ใบแจ้งหนี้
+model BankAccount {
+  id          Int     @id @default(autoincrement())
+  companyId   Int
+  /// ชื่อย่อไว้เลือกใน dropdown เช่น "กสิกร ออมทรัพย์หลัก"
+  name        String
+  bankName    String
+  branchName  String?
+  accountType String  @default("ออมทรัพย์")
+  accountName String
+  accountNo   String
+  isDefault   Boolean @default(false)
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  company CompanyProfile @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([companyId])
+  @@map("bank_accounts")
+}
+
+/// running number ต่อ (ประเภทเอกสาร, งวดเดือน) — จ่ายเลขใน transaction พร้อม row lock
+model DocumentSequence {
+  id        Int     @id @default(autoincrement())
+  docType   DocType
+  /// YYMM เช่น "2609"
+  period    String
+  currentNo Int     @default(0)
+  /// จำนวนหลักของ running — UAT ใช้ 3 (KK ใช้ 4) เก็บใน DB เพื่อขยายได้โดยไม่ต้องแก้โค้ด
+  digits    Int     @default(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([docType, period])
+  @@map("document_sequences")
+}
+
+/// ผังบัญชี — โครงสร้าง parent/child ตามเลขบัญชี
+model ChartOfAccount {
+  id       Int         @id @default(autoincrement())
+  code     String      @unique
+  name     String
+  type     AccountType
+  parentId Int?
+  isActive Boolean     @default(true)
+  sortOrder Int        @default(0)
+
+  parent   ChartOfAccount?  @relation("AccountTree", fields: [parentId], references: [id])
+  children ChartOfAccount[] @relation("AccountTree")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([parentId])
+  @@map("chart_of_accounts")
+}
+
+/// อัตราหัก ณ ที่จ่าย — ตารางแทน enum เพื่อปรับได้เมื่อกฎหมายเปลี่ยน
+model WhtRate {
+  id          Int     @id @default(autoincrement())
+  code        String  @unique
+  rate        Decimal @db.Decimal(5, 4)
+  description String
+  /// มาตราตามประมวลรัษฎากร เช่น 40(7)(8)
+  section     String?
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("wht_rates")
+}
+
+/// รอบบัญชีรายเดือน — ปิดงวดแล้วห้ามบันทึกรายการย้อนหลัง
+model FiscalPeriod {
+  id         Int       @id @default(autoincrement())
+  year       Int
+  month      Int
+  isClosed   Boolean   @default(false)
+  closedAt   DateTime?
+  closedById Int?
+  note       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month])
+  @@map("fiscal_periods")
+}

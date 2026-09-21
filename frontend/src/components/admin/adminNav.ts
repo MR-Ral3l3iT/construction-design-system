@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Pencil,
   Settings2,
+  Building2,
 } from 'lucide-react'
 import type { SidebarSection } from '@construction/ui'
 
@@ -63,6 +64,12 @@ export const adminNavSections: SidebarSection[] = [
         label: 'ตั้งค่าแผนงาน',
         icon: Settings2,
         href: '/admin/plan-settings',
+      },
+      {
+        key: 'company-settings',
+        label: 'ตั้งค่าบัญชี',
+        icon: Building2,
+        href: '/admin/settings/company',
       },
     ],
   },

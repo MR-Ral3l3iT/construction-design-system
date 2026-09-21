@@ -57,6 +57,25 @@ const PERMISSIONS = [
   { key: 'user.manage', name: 'จัดการทีมงาน', group: 'user' },
   // Dashboard
   { key: 'dashboard.view', name: 'ดู Dashboard', group: 'dashboard' },
+  // Billing — เอกสารทางบัญชี (IV / BN / RC / CN / DN / PV / RV / WHT)
+  { key: 'document.view', name: 'ดูเอกสารบัญชี', group: 'billing' },
+  { key: 'document.create', name: 'สร้างเอกสารบัญชี', group: 'billing' },
+  { key: 'document.confirm', name: 'ยืนยัน/ออกเอกสาร', group: 'billing' },
+  { key: 'document.void', name: 'ยกเลิกเอกสาร', group: 'billing' },
+  // Transaction — สมุดบัญชีกลาง
+  { key: 'transaction.view', name: 'ดูรายการบัญชี', group: 'accounting' },
+  { key: 'transaction.create', name: 'บันทึกรายการบัญชี', group: 'accounting' },
+  { key: 'transaction.approve', name: 'อนุมัติรายการบัญชี', group: 'accounting' },
+  { key: 'transaction.pay', name: 'บันทึกรับ/จ่ายเงิน', group: 'accounting' },
+  // Accounts Payable
+  { key: 'vendor.view', name: 'ดูผู้ขาย', group: 'ap' },
+  { key: 'vendor.manage', name: 'จัดการผู้ขาย', group: 'ap' },
+  { key: 'apcontract.view', name: 'ดูสัญญาผู้ขาย', group: 'ap' },
+  { key: 'apcontract.manage', name: 'จัดการสัญญาผู้ขาย', group: 'ap' },
+  // Accounting
+  { key: 'accounting.report', name: 'ดูรายงานบัญชี', group: 'accounting' },
+  { key: 'accounting.settings', name: 'ตั้งค่าบัญชี', group: 'accounting' },
+  { key: 'accounting.close', name: 'ปิดงวดบัญชี', group: 'accounting' },
 ]
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
@@ -81,6 +100,8 @@ const ROLES_CONFIG = [
       'estimate.create',
       'estimate.update',
       'dashboard.view',
+      'document.view',
+      'document.create',
     ],
   },
   {
@@ -136,6 +157,14 @@ const ROLES_CONFIG = [
       'file.view',
       'file.upload',
       'dashboard.view',
+      // เห็นเอกสารและต้นทุนของโครงการตัวเอง แต่ออก/ยกเลิกเอกสารไม่ได้
+      'document.view',
+      'transaction.view',
+      'transaction.create',
+      'vendor.view',
+      'apcontract.view',
+      'apcontract.manage',
+      'accounting.report',
     ],
   },
   {
@@ -160,11 +189,29 @@ const ROLES_CONFIG = [
     description: 'บัญชี / การเงิน',
     permissions: [
       'project.view',
+      'customer.view',
       'contract.view',
       'payment.view',
       'payment.update',
       'file.view',
+      'file.upload',
       'dashboard.view',
+      // Billing & Accounting — ACCOUNTANT เป็นเจ้าของงานส่วนนี้ทั้งหมด
+      'document.view',
+      'document.create',
+      'document.confirm',
+      'document.void',
+      'transaction.view',
+      'transaction.create',
+      'transaction.approve',
+      'transaction.pay',
+      'vendor.view',
+      'vendor.manage',
+      'apcontract.view',
+      'apcontract.manage',
+      'accounting.report',
+      'accounting.settings',
+      'accounting.close',
     ],
   },
   {
@@ -180,8 +227,108 @@ const ROLES_CONFIG = [
       'issue.view',
       'issue.create',
       'file.view',
+      // Client Portal — กรองให้เห็นเฉพาะเอกสารของตัวเองที่ระดับ query
+      'document.view',
     ],
   },
+]
+
+// ─── Accounting Foundation ────────────────────────────────────────────────────
+
+/// ข้อมูลบริษัท ย้ายมาจากที่เคย hardcode ไว้ใน frontend print page
+const COMPANY = {
+  code: 'UAT',
+  name: 'บริษัท ฃวด จำกัด',
+  branchName: 'สำนักงานใหญ่',
+  branchCode: '00000',
+  taxId: '0105564177133',
+  address: '101/24 ซอยสุขาภิบาล 5 ซอย 5 แขวงท่าแร้ง เขตบางเขน กรุงเทพมหานคร',
+  contactLine: 'โทรศัพท์: 086-6449565  e-mail : uat.arch@gmail.com',
+  phone: '086-6449565',
+  email: 'uat.arch@gmail.com',
+  logoUrl: '/uat-logo.svg',
+  isVatRegistered: true,
+  isDefault: true,
+}
+
+const BANK_ACCOUNTS = [
+  {
+    name: 'กสิกรไทย ออมทรัพย์',
+    bankName: 'ธนาคารกสิกรไทย (KBANK)',
+    branchName: 'สาขาเซ็นทรัลรัตนาธิเบศร์',
+    accountType: 'ออมทรัพย์',
+    accountName: 'บริษัท ฃวด จำกัด',
+    accountNo: '124-8-42852-6',
+    isDefault: true,
+    sortOrder: 0,
+  },
+]
+
+/// อัตราหัก ณ ที่จ่ายตามประมวลรัษฎากร
+const WHT_RATES = [
+  { code: 'WHT0', percent: 0, description: 'ไม่หัก ณ ที่จ่าย', section: null, sortOrder: 0 },
+  { code: 'WHT1', percent: 1, description: 'ค่าขนส่ง', section: '40(8)', sortOrder: 1 },
+  { code: 'WHT2', percent: 2, description: 'ค่าโฆษณา', section: '40(8)', sortOrder: 2 },
+  {
+    code: 'WHT3',
+    percent: 3,
+    description: 'ค่าจ้างทำของ / ค่ารับเหมา / ค่าบริการ',
+    section: '40(7)(8)',
+    sortOrder: 3,
+  },
+  { code: 'WHT5', percent: 5, description: 'ค่าเช่าทรัพย์สิน', section: '40(5)(6)', sortOrder: 5 },
+]
+
+type AccountTypeName = 'INCOME' | 'EXPENSE' | 'ASSET' | 'LIABILITY' | 'EQUITY'
+
+/// ผังบัญชีสำหรับธุรกิจออกแบบและก่อสร้าง — parentCode ต้องมาก่อนในลิสต์
+const CHART_OF_ACCOUNTS: Array<{
+  code: string
+  name: string
+  type: AccountTypeName
+  parentCode?: string
+}> = [
+  { code: '4000', name: 'รายได้', type: 'INCOME' },
+  { code: '4100', name: 'รายได้งานออกแบบ', type: 'INCOME', parentCode: '4000' },
+  { code: '4200', name: 'รายได้งานก่อสร้าง', type: 'INCOME', parentCode: '4000' },
+  { code: '4300', name: 'รายได้งานตกแต่งภายใน', type: 'INCOME', parentCode: '4000' },
+  { code: '4400', name: 'รายได้งานควบคุมงาน / ที่ปรึกษา', type: 'INCOME', parentCode: '4000' },
+  { code: '4900', name: 'รายได้อื่น', type: 'INCOME', parentCode: '4000' },
+
+  { code: '5000', name: 'ต้นทุนงานก่อสร้าง', type: 'EXPENSE' },
+  { code: '5100', name: 'ค่าวัสดุก่อสร้าง', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5200', name: 'ค่าแรงงาน', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5300', name: 'ค่าจ้างผู้รับเหมาช่วง', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5400', name: 'ค่าเช่าเครื่องจักร / อุปกรณ์', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5500', name: 'ค่าขนส่ง', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5600', name: 'ค่าที่ปรึกษา / วิชาชีพ', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5700', name: 'ค่าธรรมเนียมขออนุญาต / ราชการ', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5800', name: 'ค่าสาธารณูปโภคหน้างาน', type: 'EXPENSE', parentCode: '5000' },
+  { code: '5900', name: 'ต้นทุนงานอื่น', type: 'EXPENSE', parentCode: '5000' },
+
+  { code: '6000', name: 'ค่าใช้จ่ายสำนักงาน', type: 'EXPENSE' },
+  { code: '6100', name: 'เงินเดือนพนักงาน', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6200', name: 'ประกันสังคม (สมทบนายจ้าง)', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6300', name: 'ค่าเช่าสำนักงาน', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6400', name: 'ค่าน้ำ-ไฟ', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6500', name: 'ค่าอินเทอร์เน็ต / โทรศัพท์', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6600', name: 'ค่าอุปกรณ์สำนักงาน', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6700', name: 'ค่าอุปกรณ์ IT / ซอฟต์แวร์', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6800', name: 'ค่าเดินทาง / ค่าน้ำมัน', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6900', name: 'ค่ารับรอง / เลี้ยงทีม', type: 'EXPENSE', parentCode: '6000' },
+  { code: '6950', name: 'ค่าใช้จ่ายเบ็ดเตล็ด', type: 'EXPENSE', parentCode: '6000' },
+
+  { code: '7000', name: 'ค่าใช้จ่ายอื่น', type: 'EXPENSE' },
+  { code: '7100', name: 'ดอกเบี้ยจ่าย', type: 'EXPENSE', parentCode: '7000' },
+  { code: '7200', name: 'ค่าธรรมเนียมธนาคาร', type: 'EXPENSE', parentCode: '7000' },
+  { code: '7300', name: 'ค่าปรับ / เบี้ยปรับ', type: 'EXPENSE', parentCode: '7000' },
+
+  { code: '2000', name: 'หนี้สิน', type: 'LIABILITY' },
+  { code: '2100', name: 'เงินกู้ยืมกรรมการ', type: 'LIABILITY', parentCode: '2000' },
+  { code: '2900', name: 'หนี้สินอื่น', type: 'LIABILITY', parentCode: '2000' },
+
+  { code: '3000', name: 'ทุน', type: 'EQUITY' },
+  { code: '3100', name: 'ทุนจดทะเบียน', type: 'EQUITY', parentCode: '3000' },
 ]
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -662,6 +809,60 @@ async function main() {
       await prisma.workCategory.create({ data: cat })
       console.log(`    created work category: ${cat.name}`)
     }
+  }
+
+  // ─── Accounting foundation ─────────────────────────────────────────────────
+
+  console.log('  → upsert company profile & bank accounts')
+  const company = await prisma.companyProfile.upsert({
+    where: { code: COMPANY.code },
+    // ไม่ update ข้อมูลบริษัทที่มีอยู่แล้ว เพราะผู้ใช้อาจแก้ที่อยู่/โลโก้ผ่านหน้าตั้งค่าไปแล้ว
+    update: {},
+    create: COMPANY,
+  })
+
+  for (const acc of BANK_ACCOUNTS) {
+    const existing = await prisma.bankAccount.findFirst({
+      where: { companyId: company.id, accountNo: acc.accountNo, deletedAt: null },
+    })
+    if (!existing) {
+      await prisma.bankAccount.create({ data: { ...acc, companyId: company.id } })
+      console.log(`    created bank account: ${acc.bankName} ${acc.accountNo}`)
+    }
+  }
+
+  console.log('  → upsert withholding tax rates')
+  for (const r of WHT_RATES) {
+    await prisma.whtRate.upsert({
+      where: { code: r.code },
+      update: { description: r.description, section: r.section, sortOrder: r.sortOrder },
+      create: {
+        code: r.code,
+        rate: r.percent / 100,
+        description: r.description,
+        section: r.section,
+        sortOrder: r.sortOrder,
+      },
+    })
+  }
+
+  console.log('  → upsert chart of accounts')
+  for (const [index, acc] of CHART_OF_ACCOUNTS.entries()) {
+    const parent = acc.parentCode
+      ? await prisma.chartOfAccount.findUnique({ where: { code: acc.parentCode } })
+      : null
+    await prisma.chartOfAccount.upsert({
+      where: { code: acc.code },
+      // ไม่แตะ parentId/isActive ของเดิม เผื่อผู้ใช้จัดผังบัญชีเองไปแล้ว
+      update: { name: acc.name, type: acc.type },
+      create: {
+        code: acc.code,
+        name: acc.name,
+        type: acc.type,
+        parentId: parent?.id ?? null,
+        sortOrder: index,
+      },
+    })
   }
 
   console.log('✅  Seed complete')

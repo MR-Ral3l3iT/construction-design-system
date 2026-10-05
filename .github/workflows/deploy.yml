@@ -6,6 +6,18 @@ on:
       confirm:
         description: Type "deploy" to confirm production deployment
         required: true
+      mode:
+        description: |
+          registry = ดึง image ที่ CI สร้างจาก ghcr (ต้องให้เจ้าของ repo เปิด package ก่อน)
+          build    = build บน server จาก source (ต้องมี source อยู่บน server)
+        required: true
+        default: build
+        type: choice
+        options: [build, registry]
+      image_tag:
+        description: tag ที่จะ deploy — ใช้ commit SHA เพื่อ rollback ได้ (เฉพาะ mode registry)
+        required: false
+        default: latest
 
 jobs:
   deploy:
@@ -17,26 +29,53 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          MODE: ${{ github.event.inputs.mode }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: MODE,IMAGE_TAG
           script: |
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
 
-            echo "Pulling latest images..."
-            docker compose pull --quiet
+            COMPOSE="docker compose -f docker-compose.production.yml"
+            export IMAGE_TAG="${IMAGE_TAG:-latest}"
 
-            echo "Running database migrations..."
-            docker compose run --rm backend sh -c "
-              cd /app/backend && npx prisma migrate deploy
-            "
+            echo "==> สตาร์ท infra ก่อน (ต้อง healthy ก่อนจึงจะ backup/migrate ได้)"
+            $COMPOSE up -d postgres minio
 
-            echo "Starting services..."
-            docker compose --profile full up -d --remove-orphans
+            echo "==> สำรองฐานข้อมูลก่อน migrate"
+            $COMPOSE --profile backup run --rm backup
 
-            echo "Cleaning up old images..."
+            if [ "$MODE" = "registry" ]; then
+              echo "==> ดึง image tag=$IMAGE_TAG จาก registry"
+              $COMPOSE pull
+            else
+              echo "==> build บน server"
+              $COMPOSE build
+            fi
+
+            echo "==> รัน migration"
+            # pin เวอร์ชัน prisma ให้ตรงกับที่ schema ใช้ — npx prisma เฉย ๆ จะดึง
+            # major ล่าสุด (ตอนนี้ 8.x) ซึ่งเข้ากันไม่ได้กับ schema v5
+            $COMPOSE run --rm --no-deps -T backend \
+              sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate deploy"
+
+            echo "==> สตาร์ท service"
+            $COMPOSE up -d --remove-orphans
+
+            echo "==> รอให้ backend healthy"
+            for i in $(seq 1 30); do
+              status=$(docker inspect -f '{{.State.Health.Status}}' cds-backend 2>/dev/null || echo starting)
+              [ "$status" = "healthy" ] && break
+              [ "$i" = "30" ] && { echo "backend ไม่ healthy ภายใน 5 นาที"; $COMPOSE logs --tail=50 backend; exit 1; }
+              sleep 10
+            done
+
+            echo "==> ล้าง image เก่า"
             docker image prune -f
 
-            echo "Deploy complete ✓"
+            echo "Deploy สำเร็จ ✓"

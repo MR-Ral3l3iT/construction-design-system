@@ -76,4 +76,6 @@ USER nestjs
 
 EXPOSE 3001
 
-CMD ["node", "dist/src/main.js"]
+# tsconfig.build.json exclude prisma/ กับ scripts/ ออก TypeScript จึงมอง rootDir เป็น src
+# ผลลัพธ์คือ dist/main.js ไม่ใช่ dist/src/main.js — path เดิมทำให้ container start ไม่ขึ้นเลย
+CMD ["node", "dist/main.js"]

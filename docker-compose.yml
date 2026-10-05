@@ -77,11 +77,17 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3001/api/v1/health >/dev/null 2>&1 || exit 1']
+      # node:20-bookworm-slim ไม่มีทั้ง wget และ curl — ใช้ fetch ของ Node แทน
+      # มิฉะนั้น healthcheck จะ fail ตลอดและ container ขึ้น unhealthy ถาวร
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3001/api/v1/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 30s
     networks:
       - cds-network
     restart: unless-stopped

@@ -17,46 +17,82 @@ alias cds='docker compose -f docker-compose.production.yml'
 
 ---
 
-## สองโหมด: registry กับ build
+## วิธี deploy — build บนเครื่อง dev แล้วส่งไฟล์ image ขึ้น server
 
-### โหมด registry (เป้าหมาย)
+ไม่ใช้ registry และไม่ build บน server
 
-CI สร้าง image แล้ว push ขึ้น `ghcr.io` ทุกครั้งที่ merge เข้า `main` อยู่แล้ว
-server แค่ `pull` ลงมาใช้ — ไม่ต้องมี source code บนเครื่อง ไม่ต้อง build
-
-```bash
-cds pull && cds up -d
+```
+เครื่อง dev                          server
+───────────                          ──────
+./scripts/build-images.sh
+  │ buildx --platform linux/amd64
+  │ docker save | gzip
+  ▼
+images/backend-<tag>.tar.gz
+images/frontend-<tag>.tar.gz   ──upload──►  /opt/cds/images/
+images/manifest.txt                              │
+                                                 ▼
+                                         ./scripts/deploy.sh
+                                           ├ load-images.sh  (docker load + ตั้ง IMAGE_TAG)
+                                           ├ สำรอง DB
+                                           ├ prisma migrate deploy
+                                           ├ compose up -d
+                                           └ รอ backend healthy
 ```
 
-**ข้อดี** — deploy เร็ว, ไม่กิน RAM บน server ตอน build, rollback ได้ด้วยการเปลี่ยน `IMAGE_TAG`
+### ข้อควรระวังที่สำคัญที่สุด — architecture
 
-**ติดตรงไหน** — package บน ghcr ยังเป็น private ตาม default
-เจ้าของ repo ต้องเลือกทางใดทางหนึ่ง:
+เครื่อง dev เป็น **Apple Silicon (arm64)** ส่วน server เป็น **amd64**
+ถ้า build โดยไม่ระบุ platform จะได้ image arm64 ซึ่ง **โหลดขึ้น server ได้แต่รันไม่ได้**
+และ error ที่ได้คือ `exec format error` ซึ่งอ่านแล้วไม่รู้เลยว่าสาเหตุคืออะไร
 
-- **ทำ package เป็น public** — GitHub → repo → Packages → เลือก package → Package settings →
-  Change visibility → Public ทำครั้งเดียว จบ server ไม่ต้อง `docker login` เลย
-  (repo นี้เป็น public อยู่แล้ว การเปิด package จึงไม่ได้เปิดเผยอะไรเพิ่ม)
-- **คง package เป็น private** — สร้าง PAT สิทธิ์ `read:packages` แล้วบน server รัน
-  `docker login ghcr.io -u <user> --password-stdin` ครั้งเดียว credential จะอยู่ใน
-  `~/.docker/config.json` ถาวร
+`build-images.sh` จึงบังคับ `linux/amd64` เป็นค่าเริ่มต้น ตรวจ arch ของ image ที่ได้จริง
+ก่อน save และ `load-images.sh` ตรวจซ้ำอีกครั้งบน server ก่อนโหลด
 
-### โหมด build (ที่ใช้อยู่ตอนนี้)
-
-server มี source code แล้ว build เอง
+ถ้า server ไม่ใช่ amd64 ให้ระบุเอง
 
 ```bash
-cds build && cds up -d
+ssh user@server uname -m        # x86_64 = amd64, aarch64 = arm64
+PLATFORM=linux/arm64 ./scripts/build-images.sh
 ```
 
-**ข้อควรระวัง** — Next.js build ใช้ RAM 2–4GB ถ้า RAM บน server ไม่พอ
-OOM killer อาจฆ่า Postgres หรือ backend ที่กำลังให้บริการอยู่ ควร build ช่วงคนใช้น้อย
-และเช็ค `free -h` ก่อน
+### ขั้นตอนเต็ม
+
+```bash
+# ── บนเครื่อง dev ──────────────────────────────────────────────
+# NEXT_PUBLIC_API_URL ถูกฝังเข้า bundle ตอน build ไม่ใช่ตอน run
+# ใส่ผิดแล้ว frontend จะยิง API ไปผิดที่ และต้อง build ใหม่ทั้งรอบ
+NEXT_PUBLIC_API_URL=https://your-domain.com/api ./scripts/build-images.sh
+
+# upload (rsync ส่งเฉพาะส่วนต่าง ประหยัดกว่า scp เมื่อ deploy ซ้ำ)
+rsync -avz --progress images/ user@server:/opt/cds/images/
+
+# ── บน server ─────────────────────────────────────────────────
+ssh user@server
+cd /opt/cds
+./scripts/deploy.sh
+```
+
+`deploy.sh` ทำครบตั้งแต่โหลด image จนรอ backend healthy ถ้า backend ไม่ healthy
+ภายใน 5 นาที มันจะพิมพ์ log 50 บรรทัดล่าสุดแล้ว exit 1 ไม่ปล่อยให้เข้าใจผิดว่าสำเร็จ
+
+| option                              | ใช้เมื่อ                           |
+| ----------------------------------- | ---------------------------------- |
+| `./scripts/deploy.sh`               | ปกติ                               |
+| `./scripts/deploy.sh --skip-load`   | โหลด image ไว้แล้ว แค่อยาก restart |
+| `./scripts/deploy.sh --skip-backup` | ข้ามการสำรอง DB (ไม่แนะนำ)         |
+
+### ขนาดไฟล์ที่ต้อง upload
+
+ประมาณ **400MB ต่อครั้ง** (backend ~300MB + frontend ~105MB หลัง gzip)
+
+`rsync` ส่งเฉพาะส่วนต่าง แต่ไฟล์ `.tar.gz` เปลี่ยนชื่อตาม tag ทุกครั้ง จึงส่งใหม่ทั้งก้อนเสมอ
+ถ้าอินเทอร์เน็ตช้าและ deploy บ่อย การเปิด ghcr package ให้ server `pull` เองจะประหยัดกว่ามาก
+เพราะ docker จะดึงเฉพาะ layer ที่เปลี่ยน — เก็บไว้เป็นทางเลือกวันที่คุยกับเจ้าของ repo ได้
 
 ---
 
 ## สิ่งที่ต้องมีบน server
-
-### โหมด registry
 
 ```
 /opt/cds/
@@ -64,59 +100,46 @@ OOM killer อาจฆ่า Postgres หรือ backend ที่กำล�
 ├── .env                          ← ไม่อยู่ใน git สร้างจาก .env.production.example
 ├── docker/nginx/nginx.conf       ← nginx bind-mount ไฟล์นี้
 ├── docker/nginx/conf.d/cds.conf
+├── scripts/load-images.sh
+├── scripts/deploy.sh
+├── images/                       ← ไฟล์ที่ upload มา
 └── backups/
 ```
 
-ไม่ต้องมี `backend/`, `frontend/`, `packages/`, `node_modules/` เลย
+**ไม่ต้องมี `backend/`, `frontend/`, `packages/`, `node_modules/`, `pnpm-lock.yaml`**
+compose ฝั่ง production ไม่มี `build:` อยู่แล้ว server จึง build ไม่ได้แม้จะอยากทำ
 
-### โหมด build
+ของเดิมที่ `/opt/cds` มี source ครบทั้ง repo — เก็บกวาดได้หลังยืนยันว่าระบบใหม่รันได้
 
-ต้องมี source ทั้ง repo เพิ่มจากข้างบน
+```bash
+# ตรวจก่อนว่าไม่ได้ใช้อะไรอยู่จริง แล้วค่อยลบ
+cd /opt/cds
+docker compose -f docker-compose.production.yml ps     # ต้องขึ้นครบและ healthy ก่อน
+rm -rf backend frontend packages node_modules pnpm-lock.yaml pnpm-workspace.yaml \
+       package.json commitlint.config.js README.md docker-compose.yml.save
+```
+
+> `docker-compose.yml.save` คือไฟล์สำรองของ nano — มีคนแก้ compose บน server ด้วยมือ
+> ควร `diff` กับของใน git ก่อนลบ เผื่อมีการแก้ที่ยังไม่ได้เอากลับเข้า repo
 
 ---
 
-## ขั้นตอน deploy
-
-ปกติใช้ GitHub Actions → Deploy to Production → เลือก `mode` แล้วพิมพ์ `deploy`
-workflow จะทำตามลำดับนี้ให้ ถ้าต้องทำมือก็ทำตามนี้
-
-```bash
-cd /opt/cds
-
-# 1. สำรองฐานข้อมูลก่อนเสมอ
-cds --profile backup run --rm backup
-
-# 2. เอา image ใหม่มา
-cds pull          # โหมด registry
-# cds build       # โหมด build
-
-# 3. migrate — pin เวอร์ชัน prisma ให้ตรงกับ schema
-#    npx prisma เฉย ๆ จะดึง major ล่าสุด (ตอนนี้ 8.x) ซึ่งใช้กับ schema v5 ไม่ได้
-cds run --rm --no-deps -T backend \
-  sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate deploy"
-
-# 4. สตาร์ท
-cds up -d --remove-orphans
-
-# 5. ตรวจ
-docker inspect -f '{{.State.Health.Status}}' cds-backend   # ต้องได้ healthy
-cds logs --tail=50 backend
-```
-
 ## Rollback
 
-ได้เฉพาะโหมด registry เพราะ image ถูก tag ด้วย commit SHA ไว้
+image เก่ายังอยู่บนเครื่องหลัง deploy (`docker image prune -f` ลบเฉพาะที่ไม่มีใครอ้างถึง)
 
 ```bash
-# ดู tag ที่มีได้ที่หน้า Packages ของ repo
-IMAGE_TAG=<commit-sha-ที่ดี> cds pull
-IMAGE_TAG=<commit-sha-ที่ดี> cds up -d
+docker images --filter 'reference=cds-*'      # ดู tag ที่มี
+# แก้ IMAGE_TAG ใน .env ให้ชี้ tag เก่า แล้ว
+docker compose -f docker-compose.production.yml up -d
 ```
 
-ถ้า migration ทำข้อมูลเสียหาย ต้องกู้จาก dump
+ถ้า migration ทำข้อมูลเสียหาย ต้องกู้จาก dump ที่ `deploy.sh` สำรองไว้ก่อน migrate
 
 ```bash
-cds exec -T postgres pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean < backups/db_<timestamp>.dump
+cd /opt/cds && ls -lt backups/ | head
+docker compose -f docker-compose.production.yml exec -T postgres \
+  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean < backups/db_<timestamp>.dump
 ```
 
 ---
@@ -154,16 +177,21 @@ pnpm --filter @construction/backend exec prisma db push
 pnpm --filter @construction/backend exec prisma db seed
 pnpm dev
 
-# 2. ทดสอบ image จริง
+# 2. ทดสอบ image จริง — build native เร็วกว่ามาก ใช้ดูว่าโค้ดทำงานไหม
 docker compose --profile full build
 docker compose --profile full up -d
 # เปิด http://localhost:8088
 
 # 3. ตรวจว่า production config ไม่มีรูรั่ว
-docker compose -f docker-compose.production.yml --env-file .env.prod.local config
+IMAGE_TAG=dummy docker compose -f docker-compose.production.yml \
+  --env-file .env.prod.local config
 ```
 
 ข้อ 3 จะ fail ทันทีถ้า `.env` ขาดตัวแปรสำคัญ ใช้เช็คก่อนเอาขึ้น server ได้
+
+> ข้อ 2 build เป็น arm64 (native) ซึ่งเร็ว ใช้ทดสอบว่าโค้ดทำงานถูก
+> ส่วน image ที่จะส่งขึ้น server ต้องมาจาก `./scripts/build-images.sh` เท่านั้น
+> เพราะมันบังคับ `linux/amd64` ให้ — สองอย่างนี้คนละตัวกัน อย่าสลับ
 
 ---
 
@@ -173,7 +201,7 @@ docker compose -f docker-compose.production.yml --env-file .env.prod.local confi
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **backend image start ไม่ขึ้นเลย**           | `CMD node dist/src/main.js` แต่ `tsconfig.build.json` exclude `prisma/` กับ `scripts/` ออก TypeScript จึงมอง rootDir เป็น `src` ผลลัพธ์จริงคือ `dist/main.js` — container crash ทันทีด้วย `Cannot find module`     | แก้ CMD เป็น `dist/main.js`                                                                                                                      |
 | **frontend image start ไม่ขึ้นเลย**          | `outputFileTracingRoot` ตั้งเป็น `'../../'` ซึ่งชี้เหนือ repo ไปอีกชั้น ใน Docker กลายเป็น `/` ทำให้ standalone คัดโครงสร้าง path เต็มมา (`server.js` ไปอยู่ `/app/app/frontend/`) และลาก `/proc` `/usr` ติดมาด้วย | แก้เป็น `'../'` (= root ของ workspace) และปรับ COPY/CMD ใน Dockerfile ให้ตรง — image เล็กลง 412MB → 314MB                                        |
-| compose ไม่มี `image:`                       | CI สร้างและ push image ขึ้น ghcr ทุกครั้ง แต่ไม่มีใครดึงไปใช้ server จึง build เองเสมอ                                                                                                                             | ใส่ `image:` คู่กับ `build:` ใช้ได้ทั้งสองโหมด                                                                                                   |
+| compose ไม่มี `image:`                       | CI สร้างและ push image ขึ้น ghcr ทุกครั้งแต่ไม่มีใครดึงไปใช้ server จึง build เองเสมอ ทำให้ต้องเก็บ source + `node_modules` ไว้บนเครื่อง production                                                                | แยก `docker-compose.production.yml` ที่อ้าง `cds-backend:${IMAGE_TAG}` ซึ่งมาจาก `docker load` และไม่มี `build:` เลย                             |
 | healthcheck ใช้ `wget`                       | `node:20-bookworm-slim` ไม่มีทั้ง `wget` และ `curl` healthcheck จึง fail ตลอด backend ขึ้น `unhealthy` ถาวร และ `depends_on: service_healthy` ค้างรอไม่จบ                                                          | ใช้ `fetch` ของ Node แทน                                                                                                                         |
 | nginx `${DOMAIN}` ไม่ถูกแทนค่า               | nginx ไม่แทนค่า env ในไฟล์ config ที่ mount เข้า `conf.d/` โดยตรง `server_name ${DOMAIN};` จึงค้างเป็นข้อความดิบและไม่ match โดเมนจริง                                                                             | mount เป็น `templates/cds.conf.template` ให้ entrypoint envsubst ให้ พร้อม `NGINX_ENVSUBST_FILTER` กันไปทับ `$host` `$request_uri` ของ nginx เอง |
 | `npx prisma migrate deploy` ไม่ pin เวอร์ชัน | ดึง prisma major ล่าสุด (8.x) มาใช้กับ schema v5                                                                                                                                                                   | pin `prisma@5.22.0`                                                                                                                              |

@@ -1,23 +1,21 @@
 name: Deploy to Production
 
+# image ไม่ได้ถูก build ที่นี่ — build บนเครื่อง dev ด้วย scripts/build-images.sh
+# แล้ว upload ไฟล์ขึ้น server เอง workflow นี้แค่สั่งให้ server รัน deploy
+# (โหลด image → สำรอง DB → migrate → restart → รอ healthy)
+#
+# ถ้าสะดวกกว่าก็ ssh เข้าไปรัน ./scripts/deploy.sh เองได้ ผลลัพธ์เหมือนกัน
+
 on:
   workflow_dispatch:
     inputs:
       confirm:
         description: Type "deploy" to confirm production deployment
         required: true
-      mode:
-        description: |
-          registry = ดึง image ที่ CI สร้างจาก ghcr (ต้องให้เจ้าของ repo เปิด package ก่อน)
-          build    = build บน server จาก source (ต้องมี source อยู่บน server)
-        required: true
-        default: build
-        type: choice
-        options: [build, registry]
-      image_tag:
-        description: tag ที่จะ deploy — ใช้ commit SHA เพื่อ rollback ได้ (เฉพาะ mode registry)
-        required: false
-        default: latest
+      skip_load:
+        description: ข้ามการโหลด image (ใช้เมื่อโหลดไว้แล้ว แค่อยาก restart)
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -27,55 +25,20 @@ jobs:
     environment: production
 
     steps:
-      - name: Deploy via SSH
+      - name: Run deploy script on server
         uses: appleboy/ssh-action@v1
         env:
-          MODE: ${{ github.event.inputs.mode }}
-          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          SKIP_LOAD: ${{ github.event.inputs.skip_load }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: MODE,IMAGE_TAG
+          envs: SKIP_LOAD
           script: |
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
-
-            COMPOSE="docker compose -f docker-compose.production.yml"
-            export IMAGE_TAG="${IMAGE_TAG:-latest}"
-
-            echo "==> สตาร์ท infra ก่อน (ต้อง healthy ก่อนจึงจะ backup/migrate ได้)"
-            $COMPOSE up -d postgres minio
-
-            echo "==> สำรองฐานข้อมูลก่อน migrate"
-            $COMPOSE --profile backup run --rm backup
-
-            if [ "$MODE" = "registry" ]; then
-              echo "==> ดึง image tag=$IMAGE_TAG จาก registry"
-              $COMPOSE pull
+            if [ "$SKIP_LOAD" = "true" ]; then
+              ./scripts/deploy.sh --skip-load
             else
-              echo "==> build บน server"
-              $COMPOSE build
+              ./scripts/deploy.sh
             fi
-
-            echo "==> รัน migration"
-            # pin เวอร์ชัน prisma ให้ตรงกับที่ schema ใช้ — npx prisma เฉย ๆ จะดึง
-            # major ล่าสุด (ตอนนี้ 8.x) ซึ่งเข้ากันไม่ได้กับ schema v5
-            $COMPOSE run --rm --no-deps -T backend \
-              sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate deploy"
-
-            echo "==> สตาร์ท service"
-            $COMPOSE up -d --remove-orphans
-
-            echo "==> รอให้ backend healthy"
-            for i in $(seq 1 30); do
-              status=$(docker inspect -f '{{.State.Health.Status}}' cds-backend 2>/dev/null || echo starting)
-              [ "$status" = "healthy" ] && break
-              [ "$i" = "30" ] && { echo "backend ไม่ healthy ภายใน 5 นาที"; $COMPOSE logs --tail=50 backend; exit 1; }
-              sleep 10
-            done
-
-            echo "==> ล้าง image เก่า"
-            docker image prune -f
-
-            echo "Deploy สำเร็จ ✓"

@@ -10,7 +10,12 @@
 #   3. ไม่มี profiles — ทุก service ต้องขึ้นพร้อมกันเสมอ
 #   4. nginx รับ config ผ่าน templates เพื่อให้ ${DOMAIN} ถูกแทนค่าจริง
 #
-# ดูขั้นตอน deploy และโหมด registry/build ที่ docs/deployment.md
+# image มาจากไหน — build บนเครื่อง dev แล้ว upload ไฟล์ขึ้นมา ไม่ build บน server
+#   เครื่อง dev : ./scripts/build-images.sh      → ได้ไฟล์ใน images/
+#   upload      : rsync -avz images/ user@server:/opt/cds/images/
+#   บน server   : ./scripts/load-images.sh       → docker load + ตั้ง IMAGE_TAG ใน .env
+#
+# ดูขั้นตอนเต็มที่ docs/deployment.md
 # ─────────────────────────────────────────────────────────────────────────────
 
 x-logging: &default-logging # กัน log กินดิสก์จนเต็มแล้วทั้งเครื่องล่ม
@@ -82,10 +87,9 @@ services:
   #   build    : docker compose -f ... build  → build บน server แล้ว tag ชื่อเดียวกัน
   # ─────────────────────────────────────────
   backend:
-    image: ${IMAGE_PREFIX:-ghcr.io/mr-ral3l3it/construction-design-system}/backend:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    # image มาจาก scripts/load-images.sh ไม่ได้ build บนเครื่องนี้
+    # (จงใจไม่ใส่ build: เพื่อให้ build บน server ไม่ได้ และไม่ต้องมี source code)
+    image: cds-backend:${IMAGE_TAG:?ต้องตั้ง IMAGE_TAG ใน .env — รัน scripts/load-images.sh ก่อน}
     container_name: cds-backend
     env_file: .env
     environment:
@@ -127,18 +131,14 @@ services:
   # Frontend (Next.js)
   # ─────────────────────────────────────────
   frontend:
-    image: ${IMAGE_PREFIX:-ghcr.io/mr-ral3l3it/construction-design-system}/frontend:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-      args:
-        # ค่านี้ถูกฝังตอน build ไม่ใช่ตอน run — เปลี่ยนแล้วต้อง build ใหม่
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?ต้องตั้ง NEXT_PUBLIC_API_URL ใน .env}
+    image: cds-frontend:${IMAGE_TAG:?ต้องตั้ง IMAGE_TAG ใน .env — รัน scripts/load-images.sh ก่อน}
     container_name: cds-frontend
     env_file: .env
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      # หมายเหตุ: ค่านี้ถูกฝังเข้า bundle ตอน build แล้ว ใส่ตรงนี้ไม่มีผลกับหน้าเว็บ
+      # ถ้าจะเปลี่ยน URL ของ API ต้อง build image ใหม่เท่านั้น
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       PORT: '3000'
       HOSTNAME: '0.0.0.0'
     expose:

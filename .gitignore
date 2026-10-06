@@ -55,5 +55,9 @@ backend/uploads/
 # Database backups
 backups/
 
+# Docker image ที่ build ไว้ส่งขึ้น server — ไฟล์ละหลายร้อย MB ห้ามเข้า git
+# ยึดที่ root เท่านั้น ไม่ให้ไปบังโฟลเดอร์ images/ ของ asset ในอนาคต
+/images/
+
 # TypeScript
 *.tsbuildinfo

@@ -18,7 +18,22 @@ cd "$ROOT"
 # ถ้า build ผิด platform image จะ load ขึ้น server ได้แต่รันไม่ได้ ("exec format error")
 PLATFORM="${PLATFORM:-linux/amd64}"
 
-IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
+# อ่าน commit ครั้งเดียวแล้วใช้ค่าเดียวกันทั้ง tag และ manifest
+# ถ้าอ่านคนละจังหวะ แล้วมีการ commit ระหว่าง build สองค่าจะไม่ตรงกัน
+# จน tag ไม่บอกว่า image มีโค้ดอะไรอยู่จริง
+GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_SHORT="$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M)"
+GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+
+# tree สกปรก = image มีโค้ดที่ยังไม่อยู่ใน commit ไหนเลย ติด -dirty ไว้ให้รู้
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  GIT_SHORT="${GIT_SHORT}-dirty"
+  echo "คำเตือน: working tree มีไฟล์ที่ยังไม่ commit — tag จะลงท้ายด้วย -dirty"
+  echo "         image จะมีโค้ดที่ย้อนกลับไปดูใน git ไม่ได้"
+  echo
+fi
+
+IMAGE_TAG="${IMAGE_TAG:-$GIT_SHORT}"
 OUT_DIR="$ROOT/images"
 
 # อ่านจาก .env.production ให้อัตโนมัติ เพื่อให้ค่าที่ฝังเข้า bundle ตรงกับที่ server ใช้จริง
@@ -96,8 +111,8 @@ IMAGE_TAG=$IMAGE_TAG
 PLATFORM=$PLATFORM
 NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)
-GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+GIT_COMMIT=$GIT_COMMIT
+GIT_BRANCH=$GIT_BRANCH
 FILES=backend-${IMAGE_TAG}.tar.gz frontend-${IMAGE_TAG}.tar.gz
 MANIFEST
 

@@ -144,19 +144,121 @@ docker compose -f docker-compose.production.yml exec -T postgres \
 
 ---
 
+## สถาปัตยกรรมบน server — มี nginx-gateway อยู่ข้างหน้า
+
+`cds-nginx` **ไม่ได้รับทราฟฟิกจากอินเทอร์เน็ตโดยตรง** server เครื่องนี้โฮสต์หลายเว็บ
+จึงมี `nginx-gateway` ถือพอร์ต 80/443 ให้ทุกโดเมน และเป็นคน terminate TLS
+
+```
+Cloudflare (Full strict)
+      │ https
+      ▼
+nginx-gateway :443        ← ใบรับรอง Let's Encrypt, config ที่ /srv/deploy/nginx/conf.d/
+      │ http → 172.18.0.1:8088
+      ▼
+cds-nginx :80             ← routing ของแอป (/api, /storage, rate limit)
+      ├──► frontend:3000
+      ├──► backend:3001
+      └──► minio:9000
+```
+
+ผลที่ตามมา
+
+- `docker/nginx/conf.d/cds.conf` รับแค่ HTTP ไม่มี `ssl_certificate` และ**ไม่ redirect ไป https**
+  (ถ้า redirect จะวนลูปเมื่อ Cloudflare อยู่โหมด Flexible)
+- `NGINX_PORT` / `NGINX_SSL_PORT` ใน `.env` คือพอร์ตที่ gateway proxy เข้ามา ไม่ใช่ 80/443
+- ใบรับรองอยู่ฝั่ง gateway ไม่ใช่ใน volume `cds-letsencrypt`
+
+### vhost ฝั่ง gateway
+
+ไฟล์อยู่ที่ `/srv/deploy/nginx/conf.d/<domain>.conf` บน server (ไม่ได้อยู่ใน repo นี้
+เพราะเป็นของกลางที่ใช้ร่วมกับโปรเจกต์อื่น) หน้าตาแบบนี้
+
+```nginx
+server {
+    listen 80;
+    server_name inspect.uat-arch.com;
+
+    # ต้องมาก่อน location / เสมอ ไม่งั้น certbot ต่ออายุไม่ได้
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name inspect.uat-arch.com;
+
+    ssl_certificate     /etc/letsencrypt/live/inspect.uat-arch.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/inspect.uat-arch.com/privkey.pem;
+
+    client_max_body_size 60M;        # ต้องไม่น้อยกว่าที่ cds.conf ตั้งไว้
+
+    location / {
+        proxy_pass http://172.18.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        proxy_read_timeout 120s;       # เผื่อ generate PDF
+    }
+}
+```
+
+**ใช้ `172.18.0.1:8088` ไม่ใช่ `cds-nginx:80`** — gateway อยู่ docker network คนละวงกับ
+`cds-nginx` การใช้ชื่อ container ต้องสั่ง `docker network connect` ซึ่งหายทุกครั้งที่
+container ถูกสร้างใหม่ ส่วน `172.18.0.1` คือ host เห็นได้เสมอ และเป็นรูปแบบที่ vhost
+อื่นบนเครื่องนี้ใช้อยู่แล้ว
+
+### certbot บนเครื่องนี้
+
+ใช้ `certbot.timer` ของ systemd บน host และต้องใช้ **`--webroot` เท่านั้น**
+
+```bash
+certbot certonly --webroot -w /srv/deploy/nginx/certbot \
+  -d <domain> --agree-tos --no-eff-email --non-interactive
+```
+
+`--standalone` ใช้ไม่ได้เพราะ certbot จะพยายามเปิด web server ที่พอร์ต 80 เอง
+แต่ `nginx-gateway` ถือพอร์ตนั้นอยู่ → `Could not bind TCP port 80`
+
+> ตอนตรวจสอบพบว่ามีสองโดเมนของโปรเจกต์อื่นบนเครื่องนี้ตั้ง `authenticator = standalone`
+> ไว้ จึงต่ออายุไม่สำเร็จมาตลอดจนใบหมดอายุ ตรวจด้วย
+> `grep -l standalone /etc/letsencrypt/renewal/*.conf`
+
+### Cloudflare
+
+zone ตั้งเป็น **Full (strict)** — เข้ารหัสตลอดเส้นทางและตรวจใบรับรองที่ origin จริง
+
+อย่าใช้ **Flexible** เพราะช่วง Cloudflare→server จะเป็น HTTP ธรรมดา และ vhost ที่
+`return 301 https://` ในบล็อกพอร์ต 80 จะวนลูปไม่รู้จบ
+
+SSL mode เป็นค่าระดับ zone — เปลี่ยนแล้วกระทบทุกโดเมนใน zone นั้นพร้อมกัน
+ก่อนสลับต้องตรวจว่าทุกโดเมนใน zone เสิร์ฟ 443 ได้จริง
+
+```bash
+curl -skI --resolve <domain>:443:127.0.0.1 https://<domain>/ | head -3
+```
+
+---
+
 ## ทำไม production ไม่เปิดพอร์ต
 
 nginx คุยกับทุก service ผ่าน docker network ด้วยชื่อ service (`http://backend:3001`,
 `http://frontend:3000`, `http://minio:9000`) **ไม่ได้ผ่านพอร์ตที่ publish ออก host**
 การ publish พอร์ตจึงไม่จำเป็นและมีแต่ความเสี่ยง
 
-| service  | dev         | production           | เหตุผล                                     |
-| -------- | ----------- | -------------------- | ------------------------------------------ |
-| nginx    | 8088 / 8443 | **80 / 443**         | ทางเข้าเดียวจากภายนอก                      |
-| backend  | 3004        | ไม่เปิด              | เข้าตรงได้ = ข้าม TLS และ header ของ nginx |
-| frontend | 3003        | ไม่เปิด              | เหมือนกัน                                  |
-| postgres | 5433        | `127.0.0.1` เท่านั้น | เข้าผ่าน SSH tunnel                        |
-| minio    | 9000 / 9001 | `127.0.0.1` เท่านั้น | console บริหารไฟล์ ไม่ควรเปิด public       |
+| service   | dev         | production           | เหตุผล                                        |
+| --------- | ----------- | -------------------- | --------------------------------------------- |
+| cds-nginx | 8088 / 8443 | **8088**             | รับจาก nginx-gateway เท่านั้น ไม่ใช่จากภายนอก |
+| backend   | 3004        | ไม่เปิด              | เข้าตรงได้ = ข้าม TLS และ header ของ nginx    |
+| frontend  | 3003        | ไม่เปิด              | เหมือนกัน                                     |
+| postgres  | 5433        | `127.0.0.1` เท่านั้น | เข้าผ่าน SSH tunnel                           |
+| minio     | 9000 / 9001 | `127.0.0.1` เท่านั้น | console บริหารไฟล์ ไม่ควรเปิด public          |
 
 เข้า Postgres หรือ MinIO console จากเครื่องตัวเองด้วย SSH tunnel
 
@@ -230,6 +332,11 @@ openssl rand -base64 48      # ได้ 64 ตัวอักษร ใช้�
 | `npx prisma migrate deploy` ไม่ pin เวอร์ชัน | ดึง prisma major ล่าสุด (8.x) มาใช้กับ schema v5                                                                                                                                                                   | pin `prisma@5.22.0`                                                                                                                              |
 | fallback รหัสผ่าน default                    | `.env` ขาดตัวแปรแล้วใช้ `postgres` / `minioadmin` เงียบ ๆ                                                                                                                                                          | `${VAR:?ข้อความ}` ให้ fail ทันที                                                                                                                 |
 | log ไม่จำกัดขนาด                             | log โตจนดิสก์เต็มแล้วทั้งเครื่องล่ม                                                                                                                                                                                | จำกัด 10MB × 5 ไฟล์ ต่อ service                                                                                                                  |
+| **gateway หา upstream ไม่เจอ**               | vhost ฝั่ง gateway ชี้ `proxy_pass http://cds-nginx:80` แต่สองคอนเทนเนอร์อยู่คนละ docker network → 502 และถึง `network connect` ได้ มันก็หายเมื่อ container ถูกสร้างใหม่                                           | ใช้ `http://172.18.0.1:8088` ซึ่งเป็นรูปแบบที่ vhost อื่นบนเครื่องนี้ใช้อยู่แล้ว                                                                 |
+| **`cds.conf` ออกแบบผิดชั้น**                 | ทำ TLS + redirect 80→443 เองทั้งที่ gateway terminate TLS ให้แล้ว ทำให้ต้องมีใบรับรองในที่ที่ไม่มี และ redirect วนลูปเมื่อ Cloudflare เป็น Flexible                                                                | เขียนใหม่ให้รับแค่ HTTP ไม่มี TLS ไม่มี redirect                                                                                                 |
+| **rate limit นับผู้ใช้ทุกคนเป็นคนเดียว**     | `limit_req_zone $binary_remote_addr` เห็นแต่ IP ของ gateway `zone=auth` (5 ครั้ง/นาที) จึงล็อกทั้งระบบทันทีที่มีคน login ผิด 5 ครั้ง                                                                               | ตั้ง `set_real_ip_from` + `real_ip_header X-Forwarded-For` ใน `nginx.conf`                                                                       |
+| **`X-Forwarded-Proto` ผิด**                  | ภายใน cds-nginx `$scheme` เป็น http เสมอ แอปจะสร้างลิงก์เป็น http แล้วเบราว์เซอร์บล็อก mixed content                                                                                                               | ส่งต่อค่าจาก gateway ด้วย `$http_x_forwarded_proto` fallback เป็น `$scheme`                                                                      |
+| **certbot ต่ออายุไม่ได้**                    | renewal config บางโดเมนตั้ง `authenticator = standalone` ซึ่งต้องยึดพอร์ต 80 เอง แต่ gateway ถืออยู่ → ใบหมดอายุเงียบ ๆ                                                                                            | ใช้ `--webroot -w /srv/deploy/nginx/certbot` เท่านั้น                                                                                            |
 
 ### ผลทดสอบหลังแก้
 

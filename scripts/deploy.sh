@@ -44,11 +44,19 @@ if [ "$SKIP_BACKUP" = "0" ]; then
 fi
 
 # ─── 4. migration ────────────────────────────────────────────────────────────
-# pin เวอร์ชัน prisma ให้ตรงกับ schema — npx prisma เฉย ๆ จะดึง major ล่าสุด
-# (ตอนนี้ 8.x) ซึ่งใช้กับ schema v5 ไม่ได้
+# --user root จำเป็นด้วยสองเหตุผล:
+#   1. image รันด้วย user nestjs ซึ่งเป็น system user ที่ HOME = /nonexistent
+#      npx เขียน cache ไม่ได้ ล้มด้วย EACCES mkdir /nonexistent
+#   2. backend/prisma/migrations ถูก COPY มาพร้อมสิทธิ์ 700 ของเครื่อง dev
+#      user nestjs จึงอ่านไม่ได้
+# container นี้รันครั้งเดียวแล้วจบ แตะแค่ DB — ตัวแอปจริงยังรันด้วย nestjs เหมือนเดิม
+#
+# ใช้ prisma ที่ฝังมาใน image ถ้ามี (เร็วกว่าและไม่ต้องต่อเน็ต) ไม่มีค่อย fallback
+# ไป npx โดย pin เวอร์ชันไว้ — npx prisma เฉย ๆ จะดึง major ล่าสุด (8.x)
+# ซึ่งใช้กับ schema v5 ไม่ได้
 log "รัน prisma migrate deploy"
-$COMPOSE run --rm --no-deps -T backend \
-  sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate deploy"
+$COMPOSE run --rm --no-deps -T --user root backend \
+  sh -c 'cd /app/backend && if command -v prisma >/dev/null 2>&1; then prisma migrate deploy; else npx --yes prisma@5.22.0 migrate deploy; fi'
 
 # ─── 5. สตาร์ททั้งหมด ────────────────────────────────────────────────────────
 log "สตาร์ท service ทั้งหมด"

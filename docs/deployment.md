@@ -62,7 +62,7 @@ PLATFORM=linux/arm64 ./scripts/build-images.sh
 # ── บนเครื่อง dev ──────────────────────────────────────────────
 # NEXT_PUBLIC_API_URL ถูกฝังเข้า bundle ตอน build ไม่ใช่ตอน run
 # ใส่ผิดแล้ว frontend จะยิง API ไปผิดที่ และต้อง build ใหม่ทั้งรอบ
-NEXT_PUBLIC_API_URL=https://your-domain.com/api ./scripts/build-images.sh
+NEXT_PUBLIC_API_URL=https://your-domain.com ./scripts/build-images.sh
 
 # upload (rsync ส่งเฉพาะส่วนต่าง ประหยัดกว่า scp เมื่อ deploy ซ้ำ)
 rsync -avz --progress images/ user@server:/opt/cds/images/
@@ -192,6 +192,29 @@ IMAGE_TAG=dummy docker compose -f docker-compose.production.yml \
 > ข้อ 2 build เป็น arm64 (native) ซึ่งเร็ว ใช้ทดสอบว่าโค้ดทำงานถูก
 > ส่วน image ที่จะส่งขึ้น server ต้องมาจาก `./scripts/build-images.sh` เท่านั้น
 > เพราะมันบังคับ `linux/amd64` ให้ — สองอย่างนี้คนละตัวกัน อย่าสลับ
+
+---
+
+## ความปลอดภัยของ secret
+
+`.gitignore` ignore `.env.*` ทั้งหมดแล้วปล่อยเฉพาะ `*.example` กลับมา — ของเดิมไล่ชื่อทีละไฟล์
+ทำให้ `.env.production` ไม่ถูก ignore และโผล่ใน `git status` พร้อมให้ `git add -A` เก็บไปโดยไม่ตั้งใจ
+
+ก่อนนำขึ้น server ตรวจว่า `.env` ผ่านกฎทั้งหมดได้ด้วย
+
+```bash
+IMAGE_TAG=probe docker compose -f docker-compose.production.yml \
+  --env-file .env.production config >/dev/null && echo ok
+```
+
+สร้าง secret ใหม่
+
+```bash
+openssl rand -base64 48      # ได้ 64 ตัวอักษร ใช้คนละค่าสำหรับ access กับ refresh
+```
+
+> เปลี่ยน `JWT_SECRET` แล้ว **ทุกคนที่ login อยู่จะหลุดทันที** ต้อง login ใหม่ —
+> เป็นสิ่งที่ต้องยอมเมื่อ secret เดิมรั่ว เพราะ token เก่าถูกเซ็นด้วยค่าที่คนอื่นรู้
 
 ---
 

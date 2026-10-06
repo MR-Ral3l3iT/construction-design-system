@@ -21,6 +21,13 @@ PLATFORM="${PLATFORM:-linux/amd64}"
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 OUT_DIR="$ROOT/images"
 
+# อ่านจาก .env.production ให้อัตโนมัติ เพื่อให้ค่าที่ฝังเข้า bundle ตรงกับที่ server ใช้จริง
+# (ส่งผ่าน env ตอนเรียก script จะ override ค่านี้)
+if [ -z "${NEXT_PUBLIC_API_URL:-}" ] && [ -f "$ROOT/.env.production" ]; then
+  NEXT_PUBLIC_API_URL="$(grep -E '^NEXT_PUBLIC_API_URL=' "$ROOT/.env.production" | tail -1 | cut -d= -f2- | tr -d '"'"'"'" ')"
+  [ -n "$NEXT_PUBLIC_API_URL" ] && echo "อ่าน NEXT_PUBLIC_API_URL จาก .env.production"
+fi
+
 if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then
   # ค่านี้ถูกฝังเข้า bundle ตอน build ไม่ใช่ตอน run — ใส่ผิดแล้ว frontend
   # จะยิง API ไปผิดที่และต้อง build ใหม่ทั้งรอบ
@@ -31,6 +38,14 @@ fi
 
 command -v docker >/dev/null || { echo "ERROR: ไม่พบ docker" >&2; exit 1; }
 docker buildx version >/dev/null 2>&1 || { echo "ERROR: ไม่พบ docker buildx" >&2; exit 1; }
+
+case "$NEXT_PUBLIC_API_URL" in
+  */api|*/api/)
+    # frontend ต่อ /api/v1 เองใน src/lib/api.ts — ถ้าใส่ /api มาด้วยจะกลายเป็น /api/api/v1
+    echo "ERROR: NEXT_PUBLIC_API_URL ไม่ควรลงท้ายด้วย /api — ใส่แค่ origin" >&2
+    echo "       ที่ให้มา: $NEXT_PUBLIC_API_URL" >&2
+    exit 1 ;;
+esac
 
 mkdir -p "$OUT_DIR"
 

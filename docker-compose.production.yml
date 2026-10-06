@@ -1,0 +1,223 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Production compose — ใช้บน server เท่านั้น
+#
+#   docker compose -f docker-compose.production.yml up -d
+#
+# ต่างจาก docker-compose.yml (ซึ่งมีไว้สำหรับ dev บนเครื่องตัวเอง) ตรงที่
+#   1. ไม่ publish พอร์ตของ postgres / minio / backend / frontend ออก public
+#      — nginx คุยกับทุก service ผ่าน docker network ด้วยชื่อ service อยู่แล้ว
+#   2. ไม่มี fallback รหัสผ่าน default — ขาดตัวแปรไหนให้ fail ทันที
+#   3. ไม่มี profiles — ทุก service ต้องขึ้นพร้อมกันเสมอ
+#   4. nginx รับ config ผ่าน templates เพื่อให้ ${DOMAIN} ถูกแทนค่าจริง
+#
+# image มาจากไหน — build บนเครื่อง dev แล้ว upload ไฟล์ขึ้นมา ไม่ build บน server
+#   เครื่อง dev : ./scripts/build-images.sh      → ได้ไฟล์ใน images/
+#   upload      : rsync -avz images/ user@server:/opt/cds/images/
+#   บน server   : ./scripts/load-images.sh       → docker load + ตั้ง IMAGE_TAG ใน .env
+#
+# ดูขั้นตอนเต็มที่ docs/deployment.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-logging: &default-logging # กัน log กินดิสก์จนเต็มแล้วทั้งเครื่องล่ม
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
+services:
+  # ─────────────────────────────────────────
+  # PostgreSQL — ไม่เปิดออก public
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cds-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?ต้องตั้ง POSTGRES_DB ใน .env}
+      POSTGRES_USER: ${POSTGRES_USER:?ต้องตั้ง POSTGRES_USER ใน .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?ต้องตั้ง POSTGRES_PASSWORD ใน .env}
+    # เปิดเฉพาะ loopback — เข้าจากข้างนอกผ่าน SSH tunnel เท่านั้น:
+    #   ssh -L 5433:127.0.0.1:5433 user@server
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cds-network
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─────────────────────────────────────────
+  # MinIO — console ไม่เปิดออก public
+  # ─────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: cds-minio
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?ต้องตั้ง MINIO_ROOT_USER ใน .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?ต้องตั้ง MINIO_ROOT_PASSWORD ใน .env}
+    # ไฟล์ที่ลูกค้าเปิดดูวิ่งผ่าน nginx (/storage/) ไม่ใช่พอร์ตนี้
+    ports:
+      - '127.0.0.1:${MINIO_PORT:-9000}:9000'
+      - '127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - minio_data:/data
+    networks:
+      - cds-network
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─────────────────────────────────────────
+  # Backend (NestJS)
+  #
+  # image + build อยู่ด้วยกันโดยตั้งใจ รองรับทั้งสองโหมด:
+  #   registry : docker compose -f ... pull   → ดึง image ที่ CI สร้าง
+  #   build    : docker compose -f ... build  → build บน server แล้ว tag ชื่อเดียวกัน
+  # ─────────────────────────────────────────
+  backend:
+    # image มาจาก scripts/load-images.sh ไม่ได้ build บนเครื่องนี้
+    # (จงใจไม่ใส่ build: เพื่อให้ build บน server ไม่ได้ และไม่ต้องมี source code)
+    image: cds-backend:${IMAGE_TAG:?ต้องตั้ง IMAGE_TAG ใน .env — รัน scripts/load-images.sh ก่อน}
+    container_name: cds-backend
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BACKEND_PORT: 3001
+      BACKEND_HOST: 0.0.0.0
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: '9000'
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?ต้องตั้ง JWT_SECRET ใน .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?ต้องตั้ง JWT_REFRESH_SECRET ใน .env}
+    # ไม่ publish พอร์ต — nginx เรียก http://backend:3001 ผ่าน network
+    expose:
+      - '3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # node:20-bookworm-slim ไม่มีทั้ง wget และ curl — ใช้ fetch ของ Node
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:3001/api/v1/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cds-network
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ─────────────────────────────────────────
+  # Frontend (Next.js)
+  # ─────────────────────────────────────────
+  frontend:
+    image: cds-frontend:${IMAGE_TAG:?ต้องตั้ง IMAGE_TAG ใน .env — รัน scripts/load-images.sh ก่อน}
+    container_name: cds-frontend
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      # หมายเหตุ: ค่านี้ถูกฝังเข้า bundle ตอน build แล้ว ใส่ตรงนี้ไม่มีผลกับหน้าเว็บ
+      # ถ้าจะเปลี่ยน URL ของ API ต้อง build image ใหม่เท่านั้น
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+      PORT: '3000'
+      HOSTNAME: '0.0.0.0'
+    expose:
+      - '3000'
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - cds-network
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ─────────────────────────────────────────
+  # Nginx — service เดียวที่เปิดออก public
+  # ─────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: cds-nginx
+    environment:
+      DOMAIN: ${DOMAIN:?ต้องตั้ง DOMAIN ใน .env เช่น cds.example.com}
+      # จำกัดให้ envsubst แตะเฉพาะ DOMAIN ไม่งั้นตัวแปรของ nginx เอง
+      # ($host, $request_uri, $proxy_add_x_forwarded_for) จะถูกแทนค่าเป็นค่าว่าง
+      NGINX_ENVSUBST_FILTER: '^DOMAIN$$'
+    ports:
+      - '${NGINX_PORT:-80}:80'
+      - '${NGINX_SSL_PORT:-443}:443'
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # mount เป็น template ไม่ใช่ conf.d โดยตรง — nginx ไม่แทนค่า env
+      # ในไฟล์ config แต่ entrypoint จะ envsubst ไฟล์ใน templates/ ให้
+      - ./docker/nginx/conf.d/cds.conf:/etc/nginx/templates/cds.conf.template:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    networks:
+      - cds-network
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ─────────────────────────────────────────
+  # Backup — รันเมื่อสั่งเท่านั้น
+  #   docker compose -f docker-compose.production.yml --profile backup run --rm backup
+  # ─────────────────────────────────────────
+  backup:
+    image: postgres:16-alpine
+    container_name: cds-backup
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
+    command: >
+      sh -c "pg_dump -h postgres -U ${POSTGRES_USER} -d ${POSTGRES_DB} -Fc
+      -f /backups/db_$$(date +%Y%m%d_%H%M%S).dump
+      && echo 'Backup done'
+      && find /backups -name '*.dump' -mtime +30 -delete
+      && echo 'Old backups cleaned'"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cds-network
+    restart: 'no'
+    profiles:
+      - backup
+
+volumes:
+  postgres_data:
+    name: cds-postgres-data
+  minio_data:
+    name: cds-minio-data
+  letsencrypt:
+    name: cds-letsencrypt
+
+networks:
+  cds-network:
+    name: cds-network
+    driver: bridge

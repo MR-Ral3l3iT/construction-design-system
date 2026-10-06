@@ -1,11 +1,21 @@
 name: Deploy to Production
 
+# image ไม่ได้ถูก build ที่นี่ — build บนเครื่อง dev ด้วย scripts/build-images.sh
+# แล้ว upload ไฟล์ขึ้น server เอง workflow นี้แค่สั่งให้ server รัน deploy
+# (โหลด image → สำรอง DB → migrate → restart → รอ healthy)
+#
+# ถ้าสะดวกกว่าก็ ssh เข้าไปรัน ./scripts/deploy.sh เองได้ ผลลัพธ์เหมือนกัน
+
 on:
   workflow_dispatch:
     inputs:
       confirm:
         description: Type "deploy" to confirm production deployment
         required: true
+      skip_load:
+        description: ข้ามการโหลด image (ใช้เมื่อโหลดไว้แล้ว แค่อยาก restart)
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -15,28 +25,20 @@ jobs:
     environment: production
 
     steps:
-      - name: Deploy via SSH
+      - name: Run deploy script on server
         uses: appleboy/ssh-action@v1
+        env:
+          SKIP_LOAD: ${{ github.event.inputs.skip_load }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: SKIP_LOAD
           script: |
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
-
-            echo "Pulling latest images..."
-            docker compose pull --quiet
-
-            echo "Running database migrations..."
-            docker compose run --rm backend sh -c "
-              cd /app/backend && npx prisma migrate deploy
-            "
-
-            echo "Starting services..."
-            docker compose --profile full up -d --remove-orphans
-
-            echo "Cleaning up old images..."
-            docker image prune -f
-
-            echo "Deploy complete ✓"
+            if [ "$SKIP_LOAD" = "true" ]; then
+              ./scripts/deploy.sh --skip-load
+            else
+              ./scripts/deploy.sh
+            fi

@@ -9,11 +9,11 @@ build/
 out/
 
 # Environment files
+# ignore ทุกไฟล์ .env* ก่อน แล้วค่อยปล่อยเฉพาะ *.example กลับมา
+# ของเดิมระบุทีละชื่อ ทำให้ .env.production (ที่มีรหัสผ่าน production จริง)
+# หลุดออกมาเป็นไฟล์ที่ git พร้อม track — อันตรายมากเพราะ repo นี้เป็น public
 .env
-.env.local
-.env.*.local
-.env.test
-.env.test.local
+.env.*
 !.env.example
 !.env.production.example
 
@@ -54,6 +54,10 @@ backend/uploads/
 
 # Database backups
 backups/
+
+# Docker image ที่ build ไว้ส่งขึ้น server — ไฟล์ละหลายร้อย MB ห้ามเข้า git
+# ยึดที่ root เท่านั้น ไม่ให้ไปบังโฟลเดอร์ images/ ของ asset ในอนาคต
+/images/
 
 # TypeScript
 *.tsbuildinfo

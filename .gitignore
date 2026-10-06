@@ -9,11 +9,11 @@ build/
 out/
 
 # Environment files
+# ignore ทุกไฟล์ .env* ก่อน แล้วค่อยปล่อยเฉพาะ *.example กลับมา
+# ของเดิมระบุทีละชื่อ ทำให้ .env.production (ที่มีรหัสผ่าน production จริง)
+# หลุดออกมาเป็นไฟล์ที่ git พร้อม track — อันตรายมากเพราะ repo นี้เป็น public
 .env
-.env.local
-.env.*.local
-.env.test
-.env.test.local
+.env.*
 !.env.example
 !.env.production.example
 

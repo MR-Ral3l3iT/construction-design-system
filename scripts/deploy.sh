@@ -54,9 +54,63 @@ fi
 # ใช้ prisma ที่ฝังมาใน image ถ้ามี (เร็วกว่าและไม่ต้องต่อเน็ต) ไม่มีค่อย fallback
 # ไป npx โดย pin เวอร์ชันไว้ — npx prisma เฉย ๆ จะดึง major ล่าสุด (8.x)
 # ซึ่งใช้กับ schema v5 ไม่ได้
+# เรียก prisma ใน container — ใช้ตัวที่ฝังใน image ถ้ามี ไม่มีค่อย fallback ไป npx
+prisma_in_container() {
+  $COMPOSE run --rm --no-deps -T --user root backend \
+    sh -c "cd /app/backend && if command -v prisma >/dev/null 2>&1; then prisma $*; else npx --yes prisma@5.22.0 $*; fi"
+}
+
+# ตรวจสถานะก่อนลงมือ — ถ้ามี migration ที่ค้างสถานะ failed อยู่ migrate deploy
+# จะไม่ยอมทำอะไรเลยและพิมพ์ error ที่อ่านยาก จับไว้ก่อนแล้วบอกวิธีแก้ให้ชัด
+log "ตรวจสถานะ migration"
+status_out="$(prisma_in_container migrate status 2>&1 || true)"
+echo "$status_out"
+
+if echo "$status_out" | grep -qiE "failed|P3009"; then
+  cat >&2 <<'HELP'
+
+──────────────────────────────────────────────────────────────────────────────
+หยุด — มี migration ที่ค้างสถานะ failed อยู่ใน _prisma_migrations
+
+migrate deploy จะไม่ยอมทำอะไรจนกว่าจะเคลียร์สถานะนี้ ดูชื่อ migration จากผล
+ด้านบนแล้วทำตามนี้ (แทน <NAME>)
+
+  COMPOSE="docker compose -f docker-compose.production.yml"
+
+  # ถ้า SQL ไม่ได้ถูก apply จริง (ปกติเป็นแบบนี้ เพราะ postgres rollback ทั้ง transaction)
+  $COMPOSE run --rm --no-deps -T --user root backend     sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate resolve --rolled-back <NAME>"
+
+  # ถ้าโครงสร้างใน DB ตรงกับที่ migration ต้องการอยู่แล้ว (เช่น DB สร้างด้วย db push มาก่อน)
+  # ให้บอกว่าถือว่า apply แล้ว จะได้ไม่รัน SQL ซ้ำ
+  $COMPOSE run --rm --no-deps -T --user root backend     sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate resolve --applied <NAME>"
+
+แล้วรัน deploy.sh ใหม่
+──────────────────────────────────────────────────────────────────────────────
+HELP
+  exit 1
+fi
+
 log "รัน prisma migrate deploy"
-$COMPOSE run --rm --no-deps -T --user root backend \
-  sh -c 'cd /app/backend && if command -v prisma >/dev/null 2>&1; then prisma migrate deploy; else npx --yes prisma@5.22.0 migrate deploy; fi'
+if ! prisma_in_container migrate deploy; then
+  cat >&2 <<'HELP'
+
+──────────────────────────────────────────────────────────────────────────────
+migrate deploy ล้มเหลว — ยังไม่ได้สตาร์ท service ใหม่ ของเดิมยังรันอยู่
+
+ถ้า error บอกว่า "already exists" แปลว่า DB มีโครงสร้างนั้นอยู่แล้ว ซึ่งเกิดกับ
+DB ที่เคยสร้างด้วย `prisma db push` — ไม่ใช่ข้อมูลเสียหาย postgres rollback
+ทั้ง transaction ไปแล้ว แก้โดยบอก prisma ว่าถือว่า migration นั้น apply แล้ว
+
+  COMPOSE="docker compose -f docker-compose.production.yml"
+  $COMPOSE run --rm --no-deps -T --user root backend     sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate resolve --rolled-back <NAME>"
+  $COMPOSE run --rm --no-deps -T --user root backend     sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate resolve --applied <NAME>"
+
+ตรวจด้วย migrate status ให้ขึ้น "Database schema is up to date!" ก่อน
+แล้วรัน deploy.sh ใหม่  ถ้า error เป็นอย่างอื่นให้กู้จาก dump ใน backups/
+──────────────────────────────────────────────────────────────────────────────
+HELP
+  exit 1
+fi
 
 # ─── 5. สตาร์ททั้งหมด ────────────────────────────────────────────────────────
 log "สตาร์ท service ทั้งหมด"

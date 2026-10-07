@@ -78,8 +78,9 @@ echo " image ที่พร้อมใช้บนเครื่องนี�
 docker images --filter 'reference=cds-*' --format '   {{.Repository}}:{{.Tag}}  {{.Size}}' | head -10
 echo
 echo " ขั้นต่อไป:"
-echo "   docker compose -f docker-compose.production.yml --profile backup run --rm backup"
-echo "   docker compose -f docker-compose.production.yml run --rm --no-deps -T backend \\"
-echo "     sh -c 'cd /app/backend && npx --yes prisma@5.22.0 migrate deploy'"
-echo "   docker compose -f docker-compose.production.yml up -d --remove-orphans"
+echo "   ./scripts/deploy.sh --skip-load"
+echo
+echo " deploy.sh จะสำรอง DB, ตรวจสถานะ migration, migrate, สตาร์ท service"
+echo " และรอจน backend healthy ให้ครบ — อย่ารัน migrate deploy เองเพราะถ้าชน"
+echo " จะทิ้งสถานะ failed ไว้ใน _prisma_migrations แล้วต้องมากู้ทีหลัง"
 echo "─────────────────────────────────────────────"

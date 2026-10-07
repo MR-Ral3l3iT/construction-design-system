@@ -3,7 +3,7 @@
 > ขอบเขต: ตรวจพบระหว่างเตรียมระบบบัญชี (Phase 1) แล้วลามไปเจอปัญหา deployment
 > และความปลอดภัยที่มีอยู่เดิม ทั้งหมดเกิดจากการทดสอบ build/run จริง ไม่ใช่การอ่านโค้ด
 >
-> สถานะ ณ วันที่เขียน: **แก้แล้ว 14 ข้อ · ค้าง 3 ข้อ** ระบบ production ใช้งานได้ปกติที่
+> สถานะ ณ วันที่เขียน: **แก้แล้ว 15 ข้อ · ค้าง 2 ข้อ** ระบบ production ใช้งานได้ปกติที่
 > https://inspect.uat-arch.com ผ่าน Cloudflare Full (strict)
 
 ---
@@ -37,9 +37,9 @@ push ขึ้น ghcr ทุกครั้งที่ merge เข้า main
 | 11  | rate limit นับผู้ใช้ทุกคนเป็นคนเดียว               | 🟠 สูง   | แก้แล้ว  | `0d8c9ab` |
 | 12  | `X-Forwarded-Proto` ผิด → mixed content            | 🟡 กลาง  | แก้แล้ว  | `0d8c9ab` |
 | 13  | พอร์ต postgres/minio เปิดออก public                | 🟡 กลาง  | แก้แล้ว  | `ad1d243` |
-| 14  | **schema drift 7 ตาราง**                           | 🟠 สูง   | **ค้าง** | —         |
+| 14  | schema drift 7 ตาราง                               | 🟠 สูง   | แก้แล้ว  | `031acb2` |
 | 15  | **รหัสผ่าน DB/MinIO สั้นเกินไป**                   | 🟠 สูง   | **ค้าง** | —         |
-| 16  | **ใบรับรอง SSL ของโดเมนอื่นหมดอายุ**               | 🟠 สูง   | **ค้าง** | —         |
+| 16  | ใบรับรอง SSL ของโดเมนอื่นหมดอายุ                   | 🟠 สูง   | แก้แล้ว  | บน server |
 | 17  | **secret เก่าอยู่ใน git history ถาวร**             | 🟡 กลาง  | **ค้าง** | —         |
 
 ---
@@ -208,18 +208,42 @@ backend `3004`, frontend `3003` ออก `0.0.0.0` ทั้งหมด — �
 (เดิมล้มที่ `projects.province`) · `migrate diff` จาก DB ที่ได้เทียบกับ `schema.prisma`
 ไม่เหลือความต่างแม้แต่บรรทัดเดียว · migration ของ Phase 1 ลงทับได้สะอาด รวม 47 ตาราง
 
-**environment ที่มีข้อมูลอยู่แล้ว** ต้องบอก prisma ว่าถือว่า apply แล้ว ไม่ใช่รัน SQL ซ้ำ
+### ⚠️ กับดักตอน deploy ครั้งหน้า
+
+DB บน production สร้างด้วย `db push` จึงมีตารางเหล่านี้ครบอยู่แล้ว **การรัน SQL ซ้ำจะ
+error และทำให้ deploy ล้ม** ต้องบอก prisma ว่าถือว่า apply แล้ว
+
+สิ่งที่ทำให้พลาดง่าย: `docker-compose.production.yml` ไม่มี bind-mount ของ source
+container จึงอ่าน migration จากที่ฝังใน **image** ไม่ใช่จากไฟล์บน host ที่ `git pull` มา
+ตราบใดที่ยังไม่ build image ใหม่ `migrate status` จะยังรายงานจำนวนเดิมและขึ้นว่า
+`Database schema is up to date!` ซึ่ง**ไม่ได้แปลว่ารวม migration ตัวใหม่แล้ว**
+
+ลำดับที่ต้องใช้ตอน deploy image ที่มี migration นี้เป็นครั้งแรก — แยกเป็นขั้น
+อย่ารัน `deploy.sh` รวดเดียวเพราะมันจะ `migrate deploy` อัตโนมัติ
 
 ```bash
-cd /opt/cds
-docker compose -f docker-compose.production.yml run --rm --no-deps -T --user root backend \
+cd /opt/cds && git pull origin main
+COMPOSE="docker compose -f docker-compose.production.yml"
+
+# 1. โหลด image ใหม่ ยังไม่ migrate
+./scripts/load-images.sh
+
+# 2. ยืนยันว่าเห็น migration ตัวใหม่แล้วและขึ้น pending
+#    ถ้าจำนวนยังเท่าเดิม = image ยังเก่า หยุด อย่าทำขั้น 3
+$COMPOSE run --rm --no-deps -T --user root backend \
   sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate status"
-# ถ้าขึ้นว่า 20261007000001 pending และตารางมีอยู่แล้วจริง:
-docker compose -f docker-compose.production.yml run --rm --no-deps -T --user root backend \
+
+# 3. บอกว่า apply แล้ว ไม่รัน SQL จริง
+$COMPOSE run --rm --no-deps -T --user root backend \
   sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate resolve --applied 20261007000001_backfill_schema_drift"
+
+# 4. deploy ตามปกติ ข้ามขั้นโหลด image ที่ทำไปแล้ว
+./scripts/deploy.sh --skip-load
 ```
 
-รายละเอียดอยู่ในหัวไฟล์ `migration.sql` เอง
+ทำครั้งเดียวพอ หลังจากนั้น deploy ปกติได้ตลอด
+
+รายละเอียดอยู่ในหัวไฟล์ `migration.sql` เองด้วย
 
 ### 15. รหัสผ่าน DB และ MinIO สั้นเกินไป 🟠
 
@@ -228,7 +252,7 @@ docker compose -f docker-compose.production.yml run --rm --no-deps -T --user roo
 ยังไม่เปลี่ยนเพราะต้องทำพร้อมกันทั้ง `ALTER USER` ใน Postgres และ `DATABASE_URL`
 ถ้าทำครึ่งเดียวระบบล่ม ควรทำตอนมีเวลาและมี backup พร้อม
 
-### 16. ใบรับรอง SSL ของโดเมนอื่นหมดอายุ 🟠
+### 16. ใบรับรอง SSL ของโดเมนอื่นหมดอายุ 🟠 — แก้แล้ว 2026-10-07
 
 | โดเมน                               | หมดอายุ      | authenticator  |
 | ----------------------------------- | ------------ | -------------- |
@@ -252,6 +276,11 @@ Failed to renew ... Could not bind TCP port 80 because it is already in use
 ของ vhost นั้น **ก่อน** `location /`
 
 > โดเมนเหล่านี้เป็นของโปรเจกต์อื่น ต้องคุยกับเจ้าของก่อนแก้
+
+**แก้แล้ว** — ต่ออายุทั้งสองใบด้วย `webroot` (หมดอายุ 5 ม.ค. 2027) และเพิ่ม deploy hook
+ให้ reload `nginx-gateway` หลังต่ออายุ ซึ่งก่อนหน้านี้ไม่มีเลย `certbot renew --dry-run`
+ผ่านทุกใบ รายละเอียดและสิ่งที่เจอระหว่างแก้อยู่ใน
+[2026-10-07-ssl-certificate-expiry.md](./2026-10-07-ssl-certificate-expiry.md)
 
 ### 17. secret เก่าอยู่ใน git history ถาวร 🟡
 

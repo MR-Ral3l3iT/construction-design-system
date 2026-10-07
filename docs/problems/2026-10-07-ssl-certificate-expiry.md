@@ -1,7 +1,7 @@
-# ใบรับรอง SSL หมดอายุ — แผนแก้ไข
+# ใบรับรอง SSL หมดอายุ — แผนแก้ไขและผล
 
 > **เอกสารนี้เขียนเพื่อส่งต่อ** อ่านจบแล้วลงมือได้เลยโดยไม่ต้องไล่วินิจฉัยใหม่
-> บันทึกเมื่อ 2026-10-07 · ยังไม่ได้แก้ · เกี่ยวข้องกับ server `srv1653694` (`/opt/cds`)
+> บันทึกเมื่อ 2026-10-07 · **แก้แล้ว 2026-10-07** · เกี่ยวข้องกับ server `srv1653694` (`/opt/cds`)
 >
 > พบระหว่างตั้งค่า TLS ให้ `inspect.uat-arch.com` ดูบริบทเต็มที่
 > [2026-10-07-deploy-and-security.md](./2026-10-07-deploy-and-security.md) ข้อ 16
@@ -26,7 +26,66 @@ Could not bind TCP port 80 because it is already in use by another process
 
 ---
 
-## สถานะ ณ 2026-10-07
+## ผลการแก้ไข — 2026-10-07
+
+ทุกใบต่ออายุได้แล้ว ยืนยันด้วย
+
+```
+# certbot renew --dry-run 2>&1 | grep -E "Failed|failed|Congratulations"
+Congratulations, all simulated renewals succeeded:
+# grep -l "authenticator = standalone" /etc/letsencrypt/renewal/*.conf || echo "ไม่มีแล้ว"
+ไม่มีแล้ว
+```
+
+| โดเมน                                                     | ทำอะไร                                                                      | ผล                                    |
+| --------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------- |
+| `app-bcl.inform-system.com` + `api-bcl.inform-system.com` | เติมช่อง ACME ใน block พอร์ต 80 ของ `bcl.inform-system.com.conf`            | หมดอายุ 5 ม.ค. 2027 · `webroot` ✓     |
+| `archd.app-attendance.tech` + `api.app-attendance.tech`   | รวม block พอร์ต 80 สองอันเป็นอันเดียว แล้วเติมช่อง ACME                     | หมดอายุ 5 ม.ค. 2027 · `webroot` ✓     |
+| ทุกใบ                                                     | เพิ่ม deploy hook ให้ reload `nginx-gateway` หลังต่ออายุ (ก่อนหน้านี้ไม่มี) | ใบใหม่มีผลทันทีโดยไม่ต้อง restart เอง |
+| `uat-arch.com` และใบที่ใช้ `webroot` อยู่แล้ว             | ไม่ต้องแก้ — dry-run ผ่าน                                                   | ต่ออายุเองก่อน 12 พ.ย.                |
+
+ไฟล์ vhost เดิมเก็บไว้ที่ `conf.d/<file>.conf.bak-2026-10-07` · **ยังต้องแจ้งเจ้าของ
+โปรเจกต์ bcl และ archd** ว่าแก้ไฟล์ของเขาไปแล้ว และเว็บอาจล่มช่วงที่ใบหมดอายุ
+
+### สิ่งที่เจอระหว่างแก้ — ไม่มีในแผนเดิม
+
+**1. ไม่มี deploy hook** — certbot อยู่บน host ส่วน nginx อยู่ใน container ต่ออายุสำเร็จ
+แล้ว nginx ก็ยังเสิร์ฟใบเก่าที่โหลดไว้ในหน่วยความจำจนกว่าจะมีคน reload แปลว่าแม้ใบที่ใช้
+`webroot` ถูกต้องก็จะ "หมดอายุ" ในสายตาผู้ใช้อยู่ดี แก้ด้วย
+
+```bash
+cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx-gateway.sh <<'EOF'
+#!/bin/sh
+docker exec nginx-gateway nginx -t && docker exec nginx-gateway nginx -s reload
+EOF
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx-gateway.sh
+```
+
+`certbot renew --dry-run` **ไม่รัน** deploy hook ทดสอบด้วยการรันสคริปต์ตรง ๆ ตอนต่ออายุจริง
+certbot จะขึ้น `Hook 'deploy-hook' ran with error output:` ตามด้วย warning ของ nginx —
+**ไม่ใช่ error** แค่ nginx เขียน warning ลง stderr ให้ดูบรรทัด `test is successful`
+
+**2. ใบเดียวครอบหลายโดเมน** — ทั้งสองใบที่หมดมี SAN สองชื่อ (`app-bcl` + `api-bcl`,
+`archd` + `api.app-attendance`) ถ้าออกใบด้วย `certonly -d <domain>` ชื่อเดียว ใบใหม่จะ
+ไม่มี `api-*` แล้ว API ล่มทันทีหลัง reload — จึงเปลี่ยนขั้นที่ 2 เป็น `renew --cert-name`
+
+**3. 526 ตอน dry-run ครั้งแรก** — สาเหตุคือ**แก้ vhost แล้วลืม reload**
+
+```
+Invalid response from https://app-bcl.inform-system.com/.well-known/acme-challenge/...: 526
+```
+
+origin ยัง redirect ACME ไป https → Cloudflare ต่อเข้า origin ด้วยใบที่หมดอายุ → zone
+เป็น Full (strict) จึงได้ 526 ทีแรกเข้าใจผิดว่า Cloudflare บังคับ https เอง เพราะเห็น
+`Server: cloudflare` คู่กับ 301 — **header นั้นมีในทุก response ที่ผ่าน Cloudflare**
+ใช้แยกไม่ได้ว่าใครเป็นคน redirect
+
+ไม่ต้องแตะ Cloudflare เลย ทั้ง `inform-system.com` และ `app-attendance.tech` ไม่ได้เปิด
+Always Use HTTPS ถ้าวันหน้าเจอ zone ที่เปิดไว้ ดู [กรณี Cloudflare redirect เอง](#กรณี-cloudflare-redirect-เอง)
+
+---
+
+## สถานะก่อนแก้ — 2026-10-07
 
 | โดเมน                               | หมดอายุ         | authenticator  | เจ้าของ              | สถานะ              |
 | ----------------------------------- | --------------- | -------------- | -------------------- | ------------------ |
@@ -44,8 +103,8 @@ Could not bind TCP port 80 because it is already in use by another process
 ### ของเรามีสองโดเมน
 
 - `inspect.uat-arch.com` — ระบบ CDS ที่กำลังพัฒนา ออกใบใหม่ไปแล้วด้วย `webroot` ปลอดภัย
-- `uat-arch.com` — เว็บบริษัท (Laravel) ใช้ `webroot` อยู่แล้วจึงน่าจะต่ออายุได้เอง
-  **แต่ต้องยืนยัน** เพราะยังไม่เคยเห็นมันต่อสำเร็จด้วยตาตัวเอง
+- `uat-arch.com` — เว็บบริษัท (Laravel) ใช้ `webroot` อยู่แล้ว ~~แต่ต้องยืนยัน~~
+  **ยืนยันแล้ว** dry-run ผ่าน และมี deploy hook reload ให้
 
 ทั้งสองอยู่ใน Cloudflare zone `uat-arch.com` ซึ่งตั้ง SSL mode เป็น **Full (strict)**
 แปลว่า **ถ้าใบหมดอายุ เว็บจะล่มทันที** ไม่ใช่แค่ขึ้นเตือน
@@ -79,6 +138,8 @@ done
 
 ## วิธีแก้ — ต่อโดเมน
 
+> ขั้นตอนนี้ปรับตามที่ทำจริงแล้ว ใช้ซ้ำได้ถ้าวันหน้ามีใบไหนกลับไปใช้ `standalone`
+
 ทำทีละโดเมน ทดสอบทีละขั้น **อย่าแก้หลายโดเมนพร้อมกัน** เพราะ `nginx -s reload` ที่ผิด
 จะทำให้เว็บทั้ง 20 โดเมนบนเครื่องล่มพร้อมกัน
 
@@ -95,7 +156,8 @@ server {
 }
 ```
 
-ต้องเติม location **ก่อน** `return`/`location /`
+ต้องเติม location **ก่อน** `return`/`location /` — ถ้าใบครอบหลายชื่อ ช่อง ACME ต้องเปิด
+**ทุกชื่อ** ถ้า vhost แยก block พอร์ต 80 ไว้ชื่อละอัน รวมเป็นอันเดียวง่ายกว่า
 
 ```nginx
 server {
@@ -117,33 +179,43 @@ nano /srv/deploy/nginx/conf.d/<domain>.conf
 docker exec nginx-gateway nginx -t && docker exec nginx-gateway nginx -s reload
 ```
 
-ทดสอบว่าช่องเปิดจริง
+**อย่าลืม reload** — ข้ามขั้นนี้แล้วจะได้ 526 ตอนออกใบ
+
+ทดสอบว่าช่องเปิดจริง — **ผ่าน URL จริง** ทุกชื่อในใบ เพราะ Let's Encrypt เข้ามาทาง
+Cloudflare การยิง `127.0.0.1` พร้อม `Host:` ไม่ได้ผ่านเส้นทางเดียวกัน (ตอนแก้จริงได้ 301
+จาก `127.0.0.1` ทั้งที่ URL จริงได้ 404 ถูกต้องแล้ว)
 
 ```bash
-mkdir -p /srv/deploy/nginx/certbot/.well-known/acme-challenge
-echo ok > /srv/deploy/nginx/certbot/.well-known/acme-challenge/test
-curl -s -H "Host: <domain>" http://127.0.0.1/.well-known/acme-challenge/test
-# ต้องได้ "ok" ไม่ใช่ 301
-rm -f /srv/deploy/nginx/certbot/.well-known/acme-challenge/test
+curl -sI http://<domain>/.well-known/acme-challenge/x | head -1
+# ต้องได้ 404 (ไฟล์ไม่มี แต่ nginx หาใน /var/www/certbot) ไม่ใช่ 301
 ```
 
 ### ขั้นที่ 2 — ออกใบใหม่ด้วย webroot
 
 ```bash
-certbot certonly --webroot -w /srv/deploy/nginx/certbot \
-  -d <domain> --agree-tos --no-eff-email --non-interactive --force-renewal
+certbot renew --cert-name <cert-name> \
+  --webroot -w /srv/deploy/nginx/certbot --dry-run
+# ผ่านแล้วรันซ้ำโดยไม่ใส่ --dry-run
 ```
 
-คำสั่งนี้จะ**เขียนทับ** `/etc/letsencrypt/renewal/<domain>.conf` ให้เป็น `webroot`
-อัตโนมัติ ทำให้ `certbot.timer` ต่ออายุเองได้ในรอบถัดไป
+ใช้ `renew --cert-name` **ไม่ใช่** `certonly -d` เพราะ renew ใช้รายชื่อโดเมนเดิมในใบครบ
+ทุกชื่อ และเขียนทับ `/etc/letsencrypt/renewal/<cert-name>.conf` ให้เป็น `webroot`
+อัตโนมัติ ทำให้ `certbot.timer` ต่ออายุเองได้ในรอบถัดไป ไม่ต้องใส่ `--force-renewal`
+เพราะใบที่หมดหรือใกล้หมดจะถูกต่อให้เองอยู่แล้ว
 
-### ขั้นที่ 3 — reload แล้วตรวจ
+deploy hook จะ reload `nginx-gateway` ให้หลังออกใบสำเร็จ
+
+### ขั้นที่ 3 — ตรวจ
 
 ```bash
-docker exec nginx-gateway nginx -t && docker exec nginx-gateway nginx -s reload
-openssl x509 -enddate -noout -in /etc/letsencrypt/live/<domain>/fullchain.pem
-curl -skI -m 10 --resolve <domain>:443:127.0.0.1 https://<domain>/ | head -3
+grep authenticator /etc/letsencrypt/renewal/<cert-name>.conf      # ต้องเป็น webroot
+openssl x509 -noout -enddate -ext subjectAltName \
+  -in /etc/letsencrypt/live/<cert-name>/fullchain.pem             # SAN ต้องครบทุกชื่อ
+curl -sI https://<domain>/ | head -1                              # ทุกชื่อ ต้องไม่ใช่ 526
 ```
+
+ได้ 3xx/404 ไม่ใช่ปัญหา TLS — เป็นพฤติกรรมของแอป (เช่น redirect ไป login, API ไม่มี
+route ที่ `/`)
 
 ### ขั้นที่ 4 — ยืนยันว่าระบบต่ออายุเองได้
 
@@ -154,22 +226,34 @@ certbot renew --dry-run
 ต้องขึ้น `Congratulations, all simulated renewals succeeded` **ทุกโดเมน** ถ้ายังมีใบไหน
 fail แสดงว่ายังแก้ไม่ครบ
 
+### กรณี Cloudflare redirect เอง
+
+ถ้า origin ตอบ 404 แล้วแต่ URL จริงยังได้ 301 แปลว่า zone เปิด **Always Use HTTPS** ไว้
+ใบที่หมดแล้วจะออกใหม่ผ่าน HTTP-01 ไม่ได้ (Cloudflare → https → ใบหมด → 526) ต้องทำ
+
+1. เติมช่อง ACME ใน **block 443** ด้วย — รอบต่อไปจะต่ออายุผ่าน https ได้เมื่อใบยังใช้ได้
+2. ออกใบครั้งแรก: สลับ record เป็น **DNS only** (เมฆเทา) ชั่วคราว → renew → สลับกลับ
+   ถ้ามี AAAA ต้องชี้ IPv6 ของ server จริง เพราะ Let's Encrypt ลอง IPv6 ก่อน
+
+ทั้งสองข้อต้องใช้สิทธิ์ Cloudflare ของเจ้าของ zone
+
 ---
 
 ## ลำดับที่แนะนำ
 
-1. **`certbot renew --dry-run` ก่อนเลย** — บอกทันทีว่าตอนนี้ใบไหนต่อได้ใบไหนไม่ได้
-   โดยไม่ต้องรอให้หมดอายุจริง
-2. **`uat-arch.com`** — ของเรา หมด 12 พ.ย. ถ้า dry-run ผ่านก็ไม่ต้องทำอะไร
-3. **แจ้งเจ้าของโปรเจกต์อื่น** เรื่อง `archd` และ `app-bcl` ที่หมดไปแล้ว พร้อมส่ง
-   เอกสารนี้ให้ — **อย่าแก้ vhost ของโปรเจกต์อื่นเองโดยไม่บอก**
-4. **ตั้งการแจ้งเตือน** (ดูด้านล่าง)
+1. ~~**`certbot renew --dry-run` ก่อนเลย**~~ ✓ ล้มแค่ `archd` กับ `app-bcl`
+2. ~~**`uat-arch.com`**~~ ✓ dry-run ผ่าน ไม่ต้องทำอะไร
+3. ~~**deploy hook**~~ ✓ ติดตั้งแล้ว
+4. ~~**แก้ `archd` และ `app-bcl`**~~ ✓ ต่ออายุแล้ว
+5. **แจ้งเจ้าของโปรเจกต์ bcl และ archd** ว่าแก้ vhost ของเขาไปแล้ว — **ยังไม่ได้ทำ**
+6. **ตั้งการแจ้งเตือน** (ดูด้านล่าง) — **ยังไม่ได้ทำ**
 
 ---
 
 ## ป้องกันไม่ให้เกิดซ้ำ
 
-ปัญหานี้ซ่อนอยู่ได้สองเดือนเพราะไม่มีอะไรส่งเสียงเมื่อ renewal ล้ม
+ปัญหานี้ซ่อนอยู่ได้สองเดือนเพราะไม่มีอะไรส่งเสียงเมื่อ renewal ล้ม ตอนนี้ทุกใบใช้
+`webroot` แล้ว แต่ถ้าวันหน้ามีคนเพิ่มโดเมนด้วย `--standalone` อีก ก็จะเงียบแบบเดิม
 
 **ทางที่ 1 — แจ้งเตือนเมื่อ certbot ล้ม**
 
@@ -225,4 +309,6 @@ done
 | webroot ของ certbot | `/srv/deploy/nginx/certbot` → `/var/www/certbot` (ใน container)     |
 | ใบรับรอง            | `/etc/letsencrypt` mount เข้า gateway ที่ path เดียวกัน             |
 | certbot             | ติดตั้งบน **host** ไม่ใช่ container ใช้ `certbot.timer` ของ systemd |
+| deploy hook         | `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx-gateway.sh`     |
+| include ของ gateway | `conf.d/*.conf` เท่านั้น — ไฟล์ `.bak*` ใน conf.d ไม่ถูกโหลด        |
 | โปรเจกต์ CDS        | `/opt/cds` · container `cds-nginx` รับที่พอร์ต 8088                 |

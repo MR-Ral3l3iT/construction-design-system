@@ -226,9 +226,17 @@ certbot certonly --webroot -w /srv/deploy/nginx/certbot \
 `--standalone` ใช้ไม่ได้เพราะ certbot จะพยายามเปิด web server ที่พอร์ต 80 เอง
 แต่ `nginx-gateway` ถือพอร์ตนั้นอยู่ → `Could not bind TCP port 80`
 
-> ตอนตรวจสอบพบว่ามีสองโดเมนของโปรเจกต์อื่นบนเครื่องนี้ตั้ง `authenticator = standalone`
-> ไว้ จึงต่ออายุไม่สำเร็จมาตลอดจนใบหมดอายุ ตรวจด้วย
-> `grep -l standalone /etc/letsencrypt/renewal/*.conf`
+ใบที่ครอบหลายโดเมนอยู่แล้ว ถ้าจะเปลี่ยน authenticator ให้ใช้
+`certbot renew --cert-name <name> --webroot -w /srv/deploy/nginx/certbot` แทน
+`certonly -d` เพราะ renew จะใช้รายชื่อโดเมนเดิมครบทุกชื่อ
+
+certbot อยู่บน host ส่วน nginx อยู่ใน container จึงมี deploy hook
+`/etc/letsencrypt/renewal-hooks/deploy/reload-nginx-gateway.sh` สั่ง reload gateway
+หลังต่ออายุ ถ้าไม่มี hook นี้ nginx จะเสิร์ฟใบเก่าไปจนกว่าจะมีคน reload
+
+> 2026-10-07 พบสองโดเมนของโปรเจกต์อื่นตั้ง `authenticator = standalone` จนใบหมดอายุ
+> แก้แล้ว — ดู [problems/2026-10-07-ssl-certificate-expiry.md](./problems/2026-10-07-ssl-certificate-expiry.md)
+> ตรวจซ้ำได้ด้วย `grep -l standalone /etc/letsencrypt/renewal/*.conf`
 
 ### Cloudflare
 

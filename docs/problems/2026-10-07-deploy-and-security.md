@@ -3,7 +3,7 @@
 > ขอบเขต: ตรวจพบระหว่างเตรียมระบบบัญชี (Phase 1) แล้วลามไปเจอปัญหา deployment
 > และความปลอดภัยที่มีอยู่เดิม ทั้งหมดเกิดจากการทดสอบ build/run จริง ไม่ใช่การอ่านโค้ด
 >
-> สถานะ ณ วันที่เขียน: **แก้แล้ว 13 ข้อ · ค้าง 4 ข้อ** ระบบ production ใช้งานได้ปกติที่
+> สถานะ ณ วันที่เขียน: **แก้แล้ว 14 ข้อ · ค้าง 3 ข้อ** ระบบ production ใช้งานได้ปกติที่
 > https://inspect.uat-arch.com ผ่าน Cloudflare Full (strict)
 
 ---
@@ -183,7 +183,7 @@ backend `3004`, frontend `3003` ออก `0.0.0.0` ทั้งหมด — �
 
 ## ยังค้าง
 
-### 14. schema drift 7 ตาราง 🟠
+### 14. schema drift 7 ตาราง 🟠 — แก้แล้ว 2026-10-07
 
 `prisma migrate deploy` จาก DB เปล่าสร้าง schema ไม่ครบ ทำให้ `db seed` ล้มด้วย
 `column projects.province does not exist`
@@ -201,7 +201,25 @@ backend `3004`, frontend `3003` ออก `0.0.0.0` ทั้งหมด — �
 **ผลกระทบ** — environment ที่มีอยู่ทำงานปกติ แต่**สร้าง environment ใหม่จาก migration
 ไม่ได้** กระทบ CI, staging และการกู้ระบบ
 
-**วิธีแก้** — ดู `docs/billing-accounting-spec.md` §14.1
+**แก้แล้ว** — สร้าง migration ชดเชย `20261007000001_backfill_schema_drift` จาก
+`prisma migrate diff` โดยใช้ shadow database
+
+ทดสอบกับ Postgres 16 เปล่า: `migrate deploy` ลงครบ 12 migration · `db seed` ผ่าน
+(เดิมล้มที่ `projects.province`) · `migrate diff` จาก DB ที่ได้เทียบกับ `schema.prisma`
+ไม่เหลือความต่างแม้แต่บรรทัดเดียว · migration ของ Phase 1 ลงทับได้สะอาด รวม 47 ตาราง
+
+**environment ที่มีข้อมูลอยู่แล้ว** ต้องบอก prisma ว่าถือว่า apply แล้ว ไม่ใช่รัน SQL ซ้ำ
+
+```bash
+cd /opt/cds
+docker compose -f docker-compose.production.yml run --rm --no-deps -T --user root backend \
+  sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate status"
+# ถ้าขึ้นว่า 20261007000001 pending และตารางมีอยู่แล้วจริง:
+docker compose -f docker-compose.production.yml run --rm --no-deps -T --user root backend \
+  sh -c "cd /app/backend && npx --yes prisma@5.22.0 migrate resolve --applied 20261007000001_backfill_schema_drift"
+```
+
+รายละเอียดอยู่ในหัวไฟล์ `migration.sql` เอง
 
 ### 15. รหัสผ่าน DB และ MinIO สั้นเกินไป 🟠
 

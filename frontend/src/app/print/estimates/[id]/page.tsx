@@ -3,51 +3,10 @@
 import { use, useEffect, useRef, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useEstimate, Estimate } from '@/hooks/useEstimates'
+import { bahtText } from '@/lib/bahtText'
 
 const VAT_RATE = 0.07
 const WHT_RATE = 0.03
-
-function bahtText(amount: number): string {
-  const ones = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า']
-  const tens = [
-    '',
-    'สิบ',
-    'ยี่สิบ',
-    'สามสิบ',
-    'สี่สิบ',
-    'ห้าสิบ',
-    'หกสิบ',
-    'เจ็ดสิบ',
-    'แปดสิบ',
-    'เก้าสิบ',
-  ]
-  const places = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน', 'ล้าน']
-  if (amount === 0) return 'ศูนย์บาทถ้วน'
-  const intPart = Math.floor(amount)
-  const decPart = Math.round((amount - intPart) * 100)
-  function convertInt(n: number): string {
-    if (n === 0) return ''
-    if (n < 10) return ones[n]
-    const digits = String(n).split('').map(Number)
-    return digits.reduce((acc, d, i) => {
-      if (d === 0) return acc
-      const placeIdx = digits.length - 1 - i
-      const digitWord =
-        placeIdx === 1 && d === 1
-          ? 'สิบ'
-          : placeIdx === 1 && d === 2
-            ? 'ยี่สิบ'
-            : placeIdx === 1
-              ? tens[d]
-              : ones[d]
-      return acc + digitWord + (placeIdx > 1 || placeIdx === 0 ? places[placeIdx] : '')
-    }, '')
-  }
-  let result = convertInt(intPart) + 'บาท'
-  if (decPart > 0) result += convertInt(decPart) + 'สตางค์'
-  else result += 'ถ้วน'
-  return result
-}
 
 function fmt(n: number) {
   return new Intl.NumberFormat('th-TH', {

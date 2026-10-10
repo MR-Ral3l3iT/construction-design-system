@@ -32,8 +32,34 @@ export interface EstimateInstallment {
   id: number
   installmentNo: number
   description: string
+  /** "หลังจาก ..." */
+  triggerText: string | null
+  /** "ภายใน x สัปดาห์" */
+  withinWeeks: number | null
   percentage: string
   amount: string
+}
+
+export interface EstimateSchedulePhase {
+  id: number
+  name: string
+  description: string | null
+  startWeek: number
+  durationWeeks: number
+  sortOrder: number
+}
+
+/** ใบเสนอราคา (Document QT) ที่ออกจาก Estimate — ฉบับล่าสุดอยู่ก่อน */
+export interface EstimateQuotationDoc {
+  id: number
+  code: string
+  status: 'CONFIRMED' | 'SUPERSEDED' | 'VOIDED' | 'DRAFT'
+  revisionNo: number
+  documentDate: string
+  grandTotal: string
+  vatRate: string
+  whtRateId: number | null
+  voidReason: string | null
 }
 
 export interface Estimate {
@@ -48,6 +74,8 @@ export interface Estimate {
   project?: { id: number; code: string; name: string; customer?: EstimateCustomer | null }
   items?: EstimateItem[]
   installments?: EstimateInstallment[]
+  schedulePhases?: EstimateSchedulePhase[]
+  documents?: EstimateQuotationDoc[]
 }
 
 export interface EstimateListResponse {
@@ -262,8 +290,28 @@ export function useDeleteEstimateItem(estimateId: number) {
 export interface InstallmentPayload {
   installmentNo: number
   description: string
+  triggerText?: string | null
+  withinWeeks?: number | null
   percentage: string
   amount: string
+}
+
+export interface SchedulePhasePayload {
+  name: string
+  description?: string | null
+  startWeek: number
+  durationWeeks: number
+}
+
+export function useUpsertSchedule(estimateId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (phases: SchedulePhasePayload[]) => {
+      const { data } = await api.patch(`/estimates/${estimateId}/schedule`, { phases })
+      return data?.data ?? data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['estimates', estimateId] }),
+  })
 }
 
 export function useUpsertInstallments(estimateId: number) {

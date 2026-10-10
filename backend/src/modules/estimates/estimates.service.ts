@@ -89,6 +89,8 @@ const ESTIMATE_SELECT = {
       revisionNo: true,
       documentDate: true,
       grandTotal: true,
+      vatRate: true,
+      whtRateId: true,
       voidReason: true,
     },
     orderBy: { id: 'desc' as const },

@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { FileText, ArrowLeft, Printer } from 'lucide-react'
 import { PageHeader, Button } from '@construction/ui'
+import { useEstimate } from '@/hooks/useEstimates'
 import { EstimateDetailContent } from './EstimateDetailContent'
 
 interface Props {
@@ -17,6 +18,13 @@ function EstimateDetailPageInner({ estimateId }: { estimateId: number }) {
   const projectId = parseInt(searchParams.get('projectId') ?? '0', 10)
 
   const backHref = projectId > 0 ? `/admin/estimates?projectId=${projectId}` : '/admin/estimates'
+
+  // ออกใบเสนอราคาแล้ว → พิมพ์ฉบับจริงที่มีเลขที่ ไม่ใช่ร่างที่อาจแก้ไปแล้ว
+  const { data: estimate } = useEstimate(estimateId)
+  const activeQuotation = estimate?.documents?.find((d) => d.status === 'CONFIRMED')
+  const printHref = activeQuotation
+    ? `/print/document/${activeQuotation.id}`
+    : `/print/estimates/${estimateId}`
 
   return (
     <div>
@@ -45,11 +53,11 @@ function EstimateDetailPageInner({ estimateId }: { estimateId: number }) {
         actions={
           <div className="flex items-center gap-2">
             <button
-              onClick={() => window.open(`/print/estimates/${estimateId}`, '_blank')}
+              onClick={() => window.open(printHref, '_blank')}
               className="inline-flex items-center gap-1.5 rounded-lg bg-sidebar px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-sidebar-hover"
             >
               <Printer className="h-4 w-4" />
-              Export PDF
+              {activeQuotation ? `Export PDF ${activeQuotation.code}` : 'Export PDF (ร่าง)'}
             </button>
             <Link href={backHref}>
               <Button variant="outline" size="sm" icon={ArrowLeft}>

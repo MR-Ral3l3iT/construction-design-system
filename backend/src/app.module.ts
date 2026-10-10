@@ -26,6 +26,7 @@ import { RolesModule } from './modules/roles/roles.module'
 import { StorageModule } from './modules/storage/storage.module'
 import { UsersModule } from './modules/users/users.module'
 import { CompanyModule } from './modules/company/company.module'
+import { DocumentsModule } from './modules/documents/documents.module'
 import { ClientModule } from './modules/client/client.module'
 import { SiteModule } from './modules/site/site.module'
 import { WorkCategoriesModule } from './modules/work-categories/work-categories.module'
@@ -75,6 +76,7 @@ import { MailModule } from './modules/mail/mail.module'
     MailModule,
     // Phase 10 — Billing & Accounting
     CompanyModule,
+    DocumentsModule,
   ],
 })
 export class AppModule {}

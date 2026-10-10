@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { ActivityLogService } from '../../common/services/activity-log.service'
 import { buildPaginationMeta, paginationSkipTake } from '../../common/utils/pagination.util'
 import { PrismaService } from '../../database/prisma.service'
+import { DocumentsService } from '../documents/documents.service'
 import { PaginationDto } from '../../common/dto/pagination.dto'
 import {
   CreatePaymentMilestoneDto,
@@ -52,6 +53,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
+    private readonly documents: DocumentsService,
   ) {}
 
   async create(dto: CreatePaymentMilestoneDto, actorId: number) {
@@ -186,6 +188,14 @@ export class PaymentsService {
   }
 
   async importFromEstimate(projectId: number, estimateId: number, actorId: number) {
+    // Estimate ที่ออกใบเสนอราคาแล้ว ต้องนำเข้าจาก snapshot ของ QT ไม่ใช่จาก Estimate ที่ยังแก้ได้
+    // (docs/billing-accounting-spec.md §5.5) — ทางเดิมด้านล่างคงไว้ให้ Estimate รุ่นก่อน Phase 2
+    const activeQuotation = await this.documents.findActiveQuotation(estimateId)
+    if (activeQuotation) {
+      await this.documents.importMilestones(activeQuotation.id, actorId)
+      return this.findAllByProject(projectId, { page: 1, pageSize: 50 })
+    }
+
     const estimate = await this.prisma.estimate.findFirst({
       where: { id: estimateId, projectId, status: 'APPROVED' },
       select: {

@@ -14,6 +14,13 @@ describe('document-sequence helpers', () => {
       expect(buildPeriod(new Date('2026-01-05'))).toBe('2601')
       expect(buildPeriod(new Date('2027-12-31'))).toBe('2712')
     })
+
+    it('ใช้เวลาไทย ไม่ใช่ timezone ของเครื่อง', () => {
+      // 1 ต.ค. 02:00 เวลาไทย = 30 ก.ย. 19:00 UTC
+      expect(buildPeriod(new Date('2026-09-30T19:00:00Z'))).toBe('2610')
+      // 30 ก.ย. 23:59 เวลาไทย
+      expect(buildPeriod(new Date('2026-09-30T16:59:00Z'))).toBe('2609')
+    })
   })
 
   describe('formatDocNumber', () => {

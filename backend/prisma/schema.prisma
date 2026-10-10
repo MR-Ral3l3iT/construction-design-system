@@ -24,11 +24,11 @@ enum CustomerType {
 
 /// สถานะ lead pipeline ตั้งแต่รับงานจนปิดการขาย
 enum LeadStatus {
-  INTERESTED      // สนใจ
-  SITE_VISIT      // นัดสำรวจหน้างาน
-  QUOTED          // เสนอราคาแล้ว
-  CLOSED_WON      // ปิดการขายสำเร็จ
-  CLOSED_LOST     // ไม่ผ่าน / ไม่สนใจ
+  INTERESTED // สนใจ
+  SITE_VISIT // นัดสำรวจหน้างาน
+  QUOTED // เสนอราคาแล้ว
+  CLOSED_WON // ปิดการขายสำเร็จ
+  CLOSED_LOST // ไม่ผ่าน / ไม่สนใจ
 }
 
 enum ProjectType {
@@ -119,12 +119,12 @@ enum DailyReportItemStatus {
 }
 
 enum WeatherCondition {
-  SUNNY         // แดดจัด
+  SUNNY // แดดจัด
   PARTLY_CLOUDY // มีเมฆบางส่วน
-  CLOUDY        // มีเมฆมาก
-  RAINY         // ฝนตก
-  HEAVY_RAIN    // ฝนตกหนัก
-  STORMY        // พายุ
+  CLOUDY // มีเมฆมาก
+  RAINY // ฝนตก
+  HEAVY_RAIN // ฝนตกหนัก
+  STORMY // พายุ
 }
 
 enum ReportIssueSeverity {
@@ -203,13 +203,13 @@ enum CommentTargetType {
 // =============================================================================
 
 model User {
-  id        Int        @id @default(autoincrement())
-  name      String
-  email     String     @unique
-  password  String
-  phone     String?
-  avatar    String?
-  status    UserStatus @default(ACTIVE)
+  id       Int        @id @default(autoincrement())
+  name     String
+  email    String     @unique
+  password String
+  phone    String?
+  avatar   String?
+  status   UserStatus @default(ACTIVE)
 
   roles            UserRole[]
   assignedProjects ProjectMember[]
@@ -228,8 +228,8 @@ model User {
 }
 
 model Role {
-  id          Int    @id @default(autoincrement())
-  name        String @unique
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
   description String?
   isActive    Boolean @default(true)
 
@@ -291,7 +291,7 @@ model Customer {
   type        CustomerType @default(INDIVIDUAL)
   name        String
   companyName String?
-  taxId       String?   /// เลขประจำตัวผู้เสียภาษี (13 หลัก) — เฉพาะนิติบุคคล
+  taxId       String? /// เลขประจำตัวผู้เสียภาษี (13 หลัก) — เฉพาะนิติบุคคล
   email       String?
   phone       String?
   lineId      String?
@@ -307,7 +307,7 @@ model Customer {
   leadStatus LeadStatus @default(INTERESTED)
 
   /// user account สำหรับ Client Portal
-  userId Int? @unique
+  userId Int?  @unique
   user   User? @relation(fields: [userId], references: [id])
 
   projects Project[]
@@ -315,6 +315,8 @@ model Customer {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  documents Document[]
 
   @@map("customers")
 }
@@ -324,31 +326,31 @@ model Customer {
 // =============================================================================
 
 model Project {
-  id          Int           @id @default(autoincrement())
+  id              Int           @id @default(autoincrement())
   /// auto-generated: DS-YYYY-NNNN / CN-YYYY-NNNN / DC-YYYY-NNNN
-  code        String        @unique
-  name        String
-  type        ProjectType
-  status      ProjectStatus @default(LEAD)
-  customerId  Int
-  addressLine String?
-  province    String?
-  district    String?
-  subdistrict String?
-  postcode    String?
-  latitude    Decimal?      @db.Decimal(10, 7)
-  longitude   Decimal?      @db.Decimal(10, 7)
-  areaSize    Decimal?      @db.Decimal(15, 2)
-  description String?
-  budgetMin   Decimal?      @db.Decimal(15, 2)
-  budgetMax   Decimal?      @db.Decimal(15, 2)
-  startDate         DateTime?
-  endDate           DateTime?
-  designStartDate   DateTime?
-  designEndDate     DateTime?
-  progress    Int           @default(0)
+  code            String        @unique
+  name            String
+  type            ProjectType
+  status          ProjectStatus @default(LEAD)
+  customerId      Int
+  addressLine     String?
+  province        String?
+  district        String?
+  subdistrict     String?
+  postcode        String?
+  latitude        Decimal?      @db.Decimal(10, 7)
+  longitude       Decimal?      @db.Decimal(10, 7)
+  areaSize        Decimal?      @db.Decimal(15, 2)
+  description     String?
+  budgetMin       Decimal?      @db.Decimal(15, 2)
+  budgetMax       Decimal?      @db.Decimal(15, 2)
+  startDate       DateTime?
+  endDate         DateTime?
+  designStartDate DateTime?
+  designEndDate   DateTime?
+  progress        Int           @default(0)
 
-  customer       Customer          @relation(fields: [customerId], references: [id])
+  customer       Customer           @relation(fields: [customerId], references: [id])
   members        ProjectMember[]
   estimates      Estimate[]
   designTasks    DesignTask[]
@@ -364,6 +366,7 @@ model Project {
   files          FileAsset[]
   comments       Comment[]
   approvals      Approval[]
+  documents      Document[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -401,11 +404,14 @@ model Estimate {
   status      EstimateStatus @default(DRAFT)
   totalAmount Decimal        @default(0) @db.Decimal(15, 2)
 
-  project      Project               @relation(fields: [projectId], references: [id])
-  items        EstimateItem[]
-  installments EstimateInstallment[]
-  files        FileAsset[]
-  payments     PaymentMilestone[]
+  project        Project                 @relation(fields: [projectId], references: [id])
+  items          EstimateItem[]
+  installments   EstimateInstallment[]
+  schedulePhases EstimateSchedulePhase[]
+  files          FileAsset[]
+  payments       PaymentMilestone[]
+  /// Document QT ทุก revision ที่ออกจากใบนี้ — ดู docs/billing-accounting-spec.md §5.5
+  documents      Document[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -436,6 +442,10 @@ model EstimateInstallment {
   estimateId    Int
   installmentNo Int
   description   String
+  /// "หลังจาก ..." — เงื่อนไขที่ทำให้งวดถึงกำหนด เช่น "ส่งมอบแบบร่าง"
+  triggerText   String?
+  /// "ภายใน x สัปดาห์" นับจากเงื่อนไขข้างบน
+  withinWeeks   Int?
   percentage    Decimal @db.Decimal(5, 2)
   amount        Decimal @db.Decimal(15, 2)
 
@@ -445,6 +455,23 @@ model EstimateInstallment {
   updatedAt DateTime @updatedAt
 
   @@map("estimate_installments")
+}
+
+/// schedule ของใบเสนอราคา (ที่แก้ได้) — แยกอิสระจาก ProjectPlan, นับเป็นสัปดาห์จากวันเริ่มงาน
+model EstimateSchedulePhase {
+  id            Int     @id @default(autoincrement())
+  estimateId    Int
+  name          String
+  description   String?
+  /// สัปดาห์ที่เริ่ม (เริ่มที่ 1)
+  startWeek     Int
+  durationWeeks Int
+  sortOrder     Int     @default(0)
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+  @@map("estimate_schedule_phases")
 }
 
 // =============================================================================
@@ -462,7 +489,7 @@ model DesignTask {
   dueDate     DateTime?
   approvedAt  DateTime?
 
-  project   Project    @relation(fields: [projectId], references: [id])
+  project   Project     @relation(fields: [projectId], references: [id])
   files     FileAsset[]
   comments  Comment[]
   approvals Approval[]
@@ -577,24 +604,27 @@ model Contract {
 }
 
 model PaymentMilestone {
-  id              Int           @id @default(autoincrement())
-  projectId       Int
-  quotationId     Int?
-  subQuotationId  Int?
-  estimateId      Int?
-  title           String
-  description     String?
-  amount          Decimal       @default(0) @db.Decimal(15, 2)
-  dueDate         DateTime?
-  paidDate        DateTime?
-  status          PaymentStatus @default(UNPAID)
-  sortOrder       Int           @default(0)
+  id                    Int           @id @default(autoincrement())
+  projectId             Int
+  quotationId           Int?
+  subQuotationId        Int?
+  estimateId            Int?
+  /// งวดใน Document QT ที่งวดเงินนี้มาจาก — แทน estimateId สำหรับงานที่ออก QT แล้ว
+  documentInstallmentId Int?
+  title                 String
+  description           String?
+  amount                Decimal       @default(0) @db.Decimal(15, 2)
+  dueDate               DateTime?
+  paidDate              DateTime?
+  status                PaymentStatus @default(UNPAID)
+  sortOrder             Int           @default(0)
 
-  project      Project       @relation(fields: [projectId], references: [id])
-  quotation    Quotation?    @relation(fields: [quotationId], references: [id])
-  subQuotation SubQuotation? @relation(fields: [subQuotationId], references: [id])
-  estimate     Estimate?     @relation(fields: [estimateId], references: [id])
-  files        FileAsset[]
+  project             Project              @relation(fields: [projectId], references: [id])
+  quotation           Quotation?           @relation(fields: [quotationId], references: [id])
+  subQuotation        SubQuotation?        @relation(fields: [subQuotationId], references: [id])
+  estimate            Estimate?            @relation(fields: [estimateId], references: [id])
+  documentInstallment DocumentInstallment? @relation(fields: [documentInstallmentId], references: [id])
+  files               FileAsset[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -608,20 +638,20 @@ model PaymentMilestone {
 // =============================================================================
 
 model ProjectPlanTemplate {
-  id     Int    @id @default(autoincrement())
+  id     Int                        @id @default(autoincrement())
   name   String
-  type   String @unique
+  type   String                     @unique
   phases ProjectPlanTemplatePhase[]
 
   @@map("project_plan_templates")
 }
 
 model ProjectPlanTemplatePhase {
-  id         Int                      @id @default(autoincrement())
+  id         Int                       @id @default(autoincrement())
   templateId Int
   name       String
-  sortOrder  Int                      @default(0)
-  template   ProjectPlanTemplate      @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  sortOrder  Int                       @default(0)
+  template   ProjectPlanTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
   tasks      ProjectPlanTemplateTask[]
 
   @@map("project_plan_template_phases")
@@ -645,16 +675,16 @@ model ProjectPlanTemplateTask {
 // =============================================================================
 
 model ProjectPlan {
-  id           Int               @id @default(autoincrement())
-  projectId    Int               @unique
+  id           Int       @id @default(autoincrement())
+  projectId    Int       @unique
   templateType String?
   title        String
   description  String?
   startDate    DateTime?
   endDate      DateTime?
 
-  project  Project          @relation(fields: [projectId], references: [id])
-  phases   ProjectPlanPhase[]
+  project Project            @relation(fields: [projectId], references: [id])
+  phases  ProjectPlanPhase[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -664,12 +694,12 @@ model ProjectPlan {
 }
 
 model ProjectPlanPhase {
-  id        Int               @id @default(autoincrement())
+  id        Int    @id @default(autoincrement())
   planId    Int
   name      String
-  sortOrder Int               @default(0)
+  sortOrder Int    @default(0)
 
-  plan  ProjectPlan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan  ProjectPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
   tasks ProjectPlanTask[]
 
   @@map("project_plan_phases")
@@ -789,7 +819,7 @@ model DailyReportItem {
 }
 
 model DailyReportImage {
-  id           Int     @id @default(autoincrement())
+  id           Int             @id @default(autoincrement())
   reportItemId Int
   imageUrl     String
   storageKey   String?
@@ -858,7 +888,7 @@ model ChangeRequest {
   approvedAmount  Decimal?            @db.Decimal(15, 2)
   approvedAt      DateTime?
 
-  project   Project    @relation(fields: [projectId], references: [id])
+  project   Project     @relation(fields: [projectId], references: [id])
   files     FileAsset[]
   comments  Comment[]
   approvals Approval[]
@@ -969,6 +999,7 @@ model Quotation {
   categories        QuotationCategory[]
   paymentMilestones PaymentMilestone[]
   subQuotations     SubQuotation[]
+  documents         Document[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1000,11 +1031,11 @@ model SubQuotation {
 }
 
 model QuotationCategory {
-  id            Int     @id @default(autoincrement())
-  quotationId   Int
-  name          String
-  sortOrder     Int     @default(0)
-  totalAmount   Decimal @default(0) @db.Decimal(15, 2)
+  id          Int     @id @default(autoincrement())
+  quotationId Int
+  name        String
+  sortOrder   Int     @default(0)
+  totalAmount Decimal @default(0) @db.Decimal(15, 2)
 
   quotation     Quotation              @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   subCategories QuotationSubCategory[]
@@ -1088,6 +1119,14 @@ enum DocType {
   DEBIT_NOTE
 }
 
+/// lifecycle ของเอกสาร — แยกจากสถานะการชำระเงินโดยเจตนา
+enum DocStatus {
+  DRAFT
+  CONFIRMED
+  SUPERSEDED
+  VOIDED
+}
+
 /// หมวดใหญ่ของผังบัญชี
 enum AccountType {
   INCOME
@@ -1122,6 +1161,7 @@ model CompanyProfile {
   isDefault       Boolean @default(false)
 
   bankAccounts BankAccount[]
+  documents    Document[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1174,13 +1214,13 @@ model DocumentSequence {
 
 /// ผังบัญชี — โครงสร้าง parent/child ตามเลขบัญชี
 model ChartOfAccount {
-  id       Int         @id @default(autoincrement())
-  code     String      @unique
-  name     String
-  type     AccountType
-  parentId Int?
-  isActive Boolean     @default(true)
-  sortOrder Int        @default(0)
+  id        Int         @id @default(autoincrement())
+  code      String      @unique
+  name      String
+  type      AccountType
+  parentId  Int?
+  isActive  Boolean     @default(true)
+  sortOrder Int         @default(0)
 
   parent   ChartOfAccount?  @relation("AccountTree", fields: [parentId], references: [id])
   children ChartOfAccount[] @relation("AccountTree")
@@ -1207,6 +1247,8 @@ model WhtRate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  documents Document[]
+
   @@map("wht_rates")
 }
 
@@ -1225,4 +1267,164 @@ model FiscalPeriod {
 
   @@unique([year, month])
   @@map("fiscal_periods")
+}
+
+// =============================================================================
+// DOCUMENT — ตารางกลางของเอกสารบัญชีทุกประเภท (Phase 2: ใช้กับ QUOTATION)
+// คอลัมน์ฝั่ง vendor / transaction เพิ่มใน phase ของมันเอง (additive)
+// =============================================================================
+
+model Document {
+  id      Int       @id @default(autoincrement())
+  /// {PREFIX}{YY}{MM}{NNN} — revision ต่อท้าย -R{n} · null ขณะเป็น DRAFT
+  code    String?   @unique
+  docType DocType
+  status  DocStatus @default(DRAFT)
+
+  companyId  Int
+  customerId Int?
+
+  projectId       Int?
+  /// QT ออกจาก Estimate ใบนี้ (§5.5)
+  estimateId      Int?
+  /// อ้าง Quotation จาก BOQ — ไม่บังคับ ใช้กับงานถอดแบบเท่านั้น
+  quotationId     Int?
+  referenceDocId  Int?
+  referenceNumber String?
+
+  /// สาย revision / supersede
+  supersedesDocId Int? @unique
+  rootDocId       Int?
+  revisionNo      Int  @default(0)
+
+  documentDate DateTime
+  dueDate      DateTime?
+
+  // ── snapshot ผู้ขาย ณ วันออก ──
+  sellerName       String?
+  sellerBranchCode String?
+  sellerTaxId      String?
+  sellerAddress    String?
+  sellerContact    String?
+
+  // ── snapshot คู่สัญญา ณ วันออก ──
+  partyName       String?
+  partyBranchCode String?
+  partyTaxId      String?
+  partyAddress    String?
+  partyContact    String?
+  partyPhone      String?
+  partyEmail      String?
+  projectName     String?
+
+  // ── ยอดเงิน (คำนวณที่ backend ด้วย Decimal) ──
+  subtotal       Decimal @default(0) @db.Decimal(15, 2)
+  discountAmount Decimal @default(0) @db.Decimal(15, 2)
+  baseAmount     Decimal @default(0) @db.Decimal(15, 2)
+  vatRate        Decimal @default(0.07) @db.Decimal(5, 4)
+  vatAmount      Decimal @default(0) @db.Decimal(15, 2)
+  whtRateId      Int?
+  whtRate        Decimal @default(0) @db.Decimal(5, 4)
+  whtAmount      Decimal @default(0) @db.Decimal(15, 2)
+  grandTotal     Decimal @default(0) @db.Decimal(15, 2)
+  netAmount      Decimal @default(0) @db.Decimal(15, 2)
+
+  /// layout ของใบพิมพ์เท่านั้น — ห้ามเก็บยอดเงินหรือข้อมูลที่ใช้ทำรายงาน
+  formData   Json?
+  pdfOptions Json?
+
+  note         String?
+  internalNote String?
+
+  createdById   Int
+  confirmedAt   DateTime?
+  confirmedById Int?
+  voidedAt      DateTime?
+  voidedById    Int?
+  voidReason    String?
+
+  company       CompanyProfile @relation(fields: [companyId], references: [id])
+  customer      Customer?      @relation(fields: [customerId], references: [id])
+  project       Project?       @relation(fields: [projectId], references: [id])
+  estimate      Estimate?      @relation(fields: [estimateId], references: [id])
+  quotation     Quotation?     @relation(fields: [quotationId], references: [id])
+  whtRateRef    WhtRate?       @relation(fields: [whtRateId], references: [id])
+  referenceDoc  Document?      @relation("DocRef", fields: [referenceDocId], references: [id])
+  referencedBy  Document[]     @relation("DocRef")
+  supersedesDoc Document?      @relation("DocSupersede", fields: [supersedesDocId], references: [id])
+  supersededBy  Document?      @relation("DocSupersede")
+  rootDoc       Document?      @relation("DocRevision", fields: [rootDocId], references: [id])
+  revisions     Document[]     @relation("DocRevision")
+
+  items        DocumentItem[]
+  installments DocumentInstallment[]
+  schedule     DocumentSchedulePhase[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([rootDocId, revisionNo])
+  @@index([docType, status])
+  @@index([projectId])
+  @@index([estimateId])
+  @@index([customerId])
+  @@index([documentDate])
+  @@map("documents")
+}
+
+/// รายการในเอกสาร — typed แทน JSONB เพื่อให้ทำรายงานระดับบรรทัดได้
+model DocumentItem {
+  id          Int     @id @default(autoincrement())
+  documentId  Int
+  name        String
+  description String?
+  quantity    Decimal @default(1) @db.Decimal(10, 3)
+  unit        String?
+  unitPrice   Decimal @default(0) @db.Decimal(15, 2)
+  amount      Decimal @default(0) @db.Decimal(15, 2)
+  /// บรรทัดหมายเหตุ ไม่คิดเงิน
+  isNote      Boolean @default(false)
+  isDiscount  Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_items")
+}
+
+/// งวดจ่ายในใบเสนอราคา — snapshot จาก EstimateInstallment ตอนออกเอกสาร
+model DocumentInstallment {
+  id            Int     @id @default(autoincrement())
+  documentId    Int
+  installmentNo Int
+  description   String
+  triggerText   String?
+  withinWeeks   Int?
+  percentage    Decimal @db.Decimal(5, 2)
+  /// ยอดก่อน VAT — ภาษีของงวดคำนวณตอนออกใบแจ้งหนี้
+  amount        Decimal @db.Decimal(15, 2)
+
+  document          Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  paymentMilestones PaymentMilestone[]
+
+  @@unique([documentId, installmentNo])
+  @@map("document_installments")
+}
+
+/// schedule ในใบเสนอราคา — snapshot จาก EstimateSchedulePhase ไม่เชื่อมกับ ProjectPlan
+model DocumentSchedulePhase {
+  id            Int     @id @default(autoincrement())
+  documentId    Int
+  name          String
+  description   String?
+  startWeek     Int
+  durationWeeks Int
+  sortOrder     Int     @default(0)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_schedule_phases")
 }

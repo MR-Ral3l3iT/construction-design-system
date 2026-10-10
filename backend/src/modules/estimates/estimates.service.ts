@@ -3,7 +3,12 @@ import { EstimateStatus, Prisma } from '@prisma/client'
 import { ActivityLogService } from '../../common/services/activity-log.service'
 import { buildPaginationMeta, paginationSkipTake } from '../../common/utils/pagination.util'
 import { PrismaService } from '../../database/prisma.service'
-import { CreateEstimateDto, CreateEstimateItemDto } from './dto/create-estimate.dto'
+import {
+  CreateEstimateDto,
+  CreateEstimateItemDto,
+  EstimateInstallmentDto,
+  EstimateSchedulePhaseDto,
+} from './dto/create-estimate.dto'
 import { UpdateEstimateDto, UpdateEstimateStatusDto } from './dto/update-estimate.dto'
 import { PaginationDto } from '../../common/dto/pagination.dto'
 
@@ -52,14 +57,48 @@ const ESTIMATE_SELECT = {
   },
   items: { select: ITEM_SELECT, orderBy: { sortOrder: 'asc' as const } },
   installments: {
-    select: { id: true, installmentNo: true, description: true, percentage: true, amount: true },
+    select: {
+      id: true,
+      installmentNo: true,
+      description: true,
+      triggerText: true,
+      withinWeeks: true,
+      percentage: true,
+      amount: true,
+    },
     orderBy: { installmentNo: 'asc' as const },
+  },
+  schedulePhases: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      startWeek: true,
+      durationWeeks: true,
+      sortOrder: true,
+    },
+    orderBy: [{ sortOrder: 'asc' as const }, { startWeek: 'asc' as const }],
+  },
+  /// ใบเสนอราคาที่ออกจากใบนี้ทุกฉบับ — ฉบับล่าสุดก่อน (§5.5)
+  documents: {
+    where: { docType: 'QUOTATION' as const, deletedAt: null },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      revisionNo: true,
+      documentDate: true,
+      grandTotal: true,
+      voidReason: true,
+    },
+    orderBy: { id: 'desc' as const },
   },
 } satisfies Prisma.EstimateSelect
 
 const STATUS_TRANSITIONS: Partial<Record<EstimateStatus, EstimateStatus[]>> = {
   DRAFT: ['SENT'],
-  SENT: ['APPROVED', 'REJECTED'],
+  // SENT → DRAFT = "แก้ไขเพื่อออกฉบับใหม่" แล้วออกใบเสนอราคาเป็น -R{n}
+  SENT: ['APPROVED', 'REJECTED', 'DRAFT'],
   APPROVED: [],
   REJECTED: ['DRAFT'],
 }
@@ -320,6 +359,13 @@ export class EstimatesService {
         `ไม่สามารถเปลี่ยนสถานะจาก ${currentStatus} เป็น ${dto.status} ได้`,
       )
     }
+    // ใบที่เคยออกใบเสนอราคาแล้ว ต้องส่งผ่านการออกเอกสารเท่านั้น
+    // ไม่งั้นสถานะ SENT จะชี้ไปที่ QT ฉบับเก่าที่เนื้อหาไม่ตรงกับที่แก้ไปแล้ว
+    if (currentStatus === 'DRAFT' && dto.status === 'SENT' && estimate.documents.length > 0) {
+      throw new BadRequestException(
+        'ใบนี้เคยออกใบเสนอราคาแล้ว — กด "ออกใบเสนอราคา" เพื่อออกฉบับแก้ไข',
+      )
+    }
 
     const updated = await this.prisma.estimate.update({
       where: { id },
@@ -402,6 +448,9 @@ export class EstimatesService {
     if (estimate.status !== 'DRAFT') {
       throw new BadRequestException('ลบได้เฉพาะใบประเมินสถานะ DRAFT')
     }
+    if (estimate.documents.length > 0) {
+      throw new BadRequestException('ใบนี้เคยออกใบเสนอราคาแล้ว ลบไม่ได้ — ให้ยกเลิกใบเสนอราคาแทน')
+    }
 
     await this.prisma.$transaction([
       this.prisma.estimateItem.deleteMany({ where: { estimateId: id } }),
@@ -430,28 +479,56 @@ export class EstimatesService {
     await this.recalcTotal(estimateId)
   }
 
-  async upsertInstallments(
-    estimateId: number,
-    installments: {
-      installmentNo: number
-      description: string
-      percentage: string
-      amount: string
-    }[],
-  ) {
-    await this.findOne(estimateId)
-    await this.prisma.estimateInstallment.deleteMany({ where: { estimateId } })
-    if (installments.length) {
-      await this.prisma.estimateInstallment.createMany({
-        data: installments.map((inst) => ({
-          estimateId,
-          installmentNo: inst.installmentNo,
-          description: inst.description,
-          percentage: inst.percentage,
-          amount: inst.amount,
-        })),
-      })
+  /**
+   * ใบที่ออกใบเสนอราคาแล้วแก้งวด/schedule ได้เฉพาะตอนเป็นร่าง (ก่อนออกฉบับแก้ไข)
+   * ใบรุ่นเก่าที่ยังไม่เคยออกเอกสารคงพฤติกรรมเดิม — แก้ได้ทุกสถานะ
+   */
+  private assertScheduleEditable(estimate: { status: string; documents: unknown[] }) {
+    if (estimate.status !== 'DRAFT' && estimate.documents.length > 0) {
+      throw new BadRequestException(
+        'ใบเสนอราคาออกไปแล้ว — กด "แก้ไขเพื่อออกฉบับใหม่" ก่อนจึงจะแก้งวดหรือ schedule ได้',
+      )
     }
+  }
+
+  async upsertInstallments(estimateId: number, installments: EstimateInstallmentDto[]) {
+    this.assertScheduleEditable(await this.findOne(estimateId))
+    await this.prisma.$transaction(async (tx) => {
+      await tx.estimateInstallment.deleteMany({ where: { estimateId } })
+      if (installments.length) {
+        await tx.estimateInstallment.createMany({
+          data: installments.map((inst) => ({
+            estimateId,
+            installmentNo: inst.installmentNo,
+            description: inst.description,
+            triggerText: inst.triggerText?.trim() || null,
+            withinWeeks: inst.withinWeeks ?? null,
+            percentage: inst.percentage,
+            amount: inst.amount,
+          })),
+        })
+      }
+    })
+    return this.findOne(estimateId)
+  }
+
+  async upsertSchedule(estimateId: number, phases: EstimateSchedulePhaseDto[]) {
+    this.assertScheduleEditable(await this.findOne(estimateId))
+    await this.prisma.$transaction(async (tx) => {
+      await tx.estimateSchedulePhase.deleteMany({ where: { estimateId } })
+      if (phases.length) {
+        await tx.estimateSchedulePhase.createMany({
+          data: phases.map((ph, idx) => ({
+            estimateId,
+            name: ph.name,
+            description: ph.description?.trim() || null,
+            startWeek: ph.startWeek,
+            durationWeeks: ph.durationWeeks,
+            sortOrder: idx,
+          })),
+        })
+      }
+    })
     return this.findOne(estimateId)
   }
 

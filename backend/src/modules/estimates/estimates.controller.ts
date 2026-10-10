@@ -13,7 +13,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator'
 import { Permissions } from '../../common/decorators/permissions.decorator'
 import { PaginationDto } from '../../common/dto/pagination.dto'
-import { CreateEstimateDto, CreateEstimateItemDto } from './dto/create-estimate.dto'
+import {
+  CreateEstimateDto,
+  CreateEstimateItemDto,
+  UpsertInstallmentsDto,
+  UpsertScheduleDto,
+} from './dto/create-estimate.dto'
 import { UpdateEstimateDto, UpdateEstimateStatusDto } from './dto/update-estimate.dto'
 import { EstimatesService } from './estimates.service'
 
@@ -108,19 +113,15 @@ export class EstimatesController {
   @Patch(':id/installments')
   @Permissions('estimate.update')
   @ApiOperation({ summary: 'บันทึกรอบจ่ายเงิน (replace all)' })
-  upsertInstallments(
-    @Param('id', ParseIntPipe) id: number,
-    @Body()
-    body: {
-      installments: {
-        installmentNo: number
-        description: string
-        percentage: string
-        amount: string
-      }[]
-    },
-  ) {
+  upsertInstallments(@Param('id', ParseIntPipe) id: number, @Body() body: UpsertInstallmentsDto) {
     return this.estimatesService.upsertInstallments(id, body.installments)
+  }
+
+  @Patch(':id/schedule')
+  @Permissions('estimate.update')
+  @ApiOperation({ summary: 'บันทึก schedule ของใบเสนอราคา (replace all)' })
+  upsertSchedule(@Param('id', ParseIntPipe) id: number, @Body() body: UpsertScheduleDto) {
+    return this.estimatesService.upsertSchedule(id, body.phases)
   }
 
   @Delete(':id')

@@ -27,10 +27,22 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
   DEBIT_NOTE: 'ใบเพิ่มหนี้',
 }
 
-/** งวดของ running number — YYMM เช่น "2609" */
+const BANGKOK_YYMM = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Bangkok',
+  year: '2-digit',
+  month: '2-digit',
+})
+
+/**
+ * งวดของ running number — YYMM เช่น "2609" ตามเวลาไทยเสมอ
+ *
+ * container บน production ไม่ได้ตั้ง TZ จึงเป็น UTC ถ้าใช้ getMonth() ตรง ๆ
+ * เอกสารที่ออกช่วง 00:00–07:00 ของวันที่ 1 จะได้เลขของเดือนก่อนหน้า
+ */
 export function buildPeriod(date: Date = new Date()): string {
-  const yy = String(date.getFullYear()).slice(-2)
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const parts = BANGKOK_YYMM.formatToParts(date)
+  const yy = parts.find((p) => p.type === 'year')?.value ?? ''
+  const mm = parts.find((p) => p.type === 'month')?.value ?? ''
   return `${yy}${mm}`
 }
 

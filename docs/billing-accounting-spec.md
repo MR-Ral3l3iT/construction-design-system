@@ -1,6 +1,6 @@
 # Spec ระบบออกบิล บัญชี และการเงิน (Billing & Accounting)
 
-> สถานะ: **v2.2 — Phase 1 สร้างเสร็จและทดสอบแล้ว**
+> สถานะ: **v2.3 — Phase 1 สร้างเสร็จและทดสอบแล้ว · ปรับมติใบเสนอราคาให้ใช้ Estimate เป็นต้นทาง (§5.5)**
 > อัปเดตให้ตรงกับโค้ดที่ implement จริง (ดู §13 สำหรับสถานะแต่ละ phase)
 > ขอบเขต: ออกเอกสารภาษีเต็มรูปแบบตามประมวลรัษฎากร + AR + AP + งบกำไรขาดทุนรายโครงการ
 
@@ -13,6 +13,7 @@
 | ระดับความถูกต้องทางภาษี       | เต็มรูปแบบ — ใบกำกับภาษี, ภ.พ.30, ภ.ง.ด.3/53, 50 ทวิ                                            |
 | ขอบเขตการเงิน                 | AR + AP + P&L รายโครงการ (รายได้ / ทุน / รายจ่าย Vendor)                                        |
 | ความสัมพันธ์กับ BOQ           | **ยังไม่เชื่อม** — ทุนมาจากรายจ่ายที่บันทึกจริงและผูก `projectId`                               |
+| ใบเสนอราคา                    | **`Estimate` (ใบประเมินราคา) = Document QT = ใบเสนอราคา** — ใบเดียว ไม่กรอกซ้ำ (§5.5)           |
 | เอกสารเดิมใน `/print/billing` | ไม่ย้าย ไม่ migrate — เริ่มนับเลขใหม่                                                           |
 | รูปแบบเลขที่                  | `{PREFIX}{YY}{MM}{NNN}` — running **3 หลัก** reset ทุกเดือน (ต่างจาก KK ที่ใช้ 4 หลักโดยตั้งใจ) |
 | บริษัทผู้ออกเอกสาร            | **บริษัท ฃวด จำกัด (UAT) รายเดียว** — ไม่รองรับหลายบริษัท                                       |
@@ -110,10 +111,15 @@ Transaction        รายการบัญชี         สมุดบั�
 ```
 ┌── ฝั่งขาย (AR) ────────────────────────────────────────────────────┐
 
-  Quotation (มีอยู่แล้ว)        PaymentMilestone (มีอยู่แล้ว)
-  BOQ-linked, categories        แผนเก็บเงิน + อัตราภาษี
-        │                              │
-        └──────────────┬───────────────┘
+  Estimate (มีอยู่แล้ว — ที่ทำงาน แก้ได้)
+  รายการงาน + งวดจ่าย + schedule
+        │ "ออกใบเสนอราคา" (confirm)
+        ▼
+  Document: QT  ── snapshot แช่แข็ง ได้เลข QT{YY}{MM}{NNN}      Contract (template สัญญา)
+        │          ลูกค้ารับ                                    ผูกกับ QT ในระบบ (§5.5)
+        ▼
+  PaymentMilestone (มีอยู่แล้ว) ── 1 งวดใน QT = 1 งวดเงิน + อัตราภาษี
+                       │
                        ▼
                Document: IV  ── ใบแจ้งหนี้ ตั้งหนี้ ยังไม่ใช่เอกสารภาษี
                        │
@@ -223,29 +229,50 @@ async next(tx: Prisma.TransactionClient, docType: DocType, at: Date): Promise<st
 
 `CN`/`DN` เป็นส่วนที่เพิ่มจากชุดของ KK เพราะสเปคนี้ต้องรองรับภาษีเต็มรูปแบบ
 
-### 5.5 มี "ใบเสนอราคา" สองตัวในระบบ — ตั้งใจให้เป็นแบบนั้น
+### 5.5 ใบเสนอราคา — `Estimate` คือต้นทาง, Document QT คือฉบับที่ออกจริง
 
-**มติ:** สร้าง `QUOTATION` ใน `Document` แยกจาก `Quotation` เดิม
+**มติ (2026-10-08, แทนมติเดิม "สร้าง QT แยกจาก `Quotation`"):**
+**`Estimate` (ใบประเมินราคา) = Document QT = ใบเสนอราคา** เป็นของชิ้นเดียวกันในสายตาผู้ใช้
 
-|             | `Quotation` (ของเดิม)          | `Document` docType `QUOTATION` (ใหม่) |
-| ----------- | ------------------------------ | ------------------------------------- |
-| ใช้ในสายงาน | ออกแบบ / ก่อสร้าง              | **บัญชีเท่านั้น**                     |
-| ผูกกับ      | BOQ + categories/subCategories | `projectId`                           |
-| เกิดเมื่อไร | หลังงานอนุมัติแล้วถอดราคา      | **ตอนเสนอราคาให้ลูกค้าครั้งแรก**      |
-| เลขที่      | `QT-YYYY-NNNN` (ของเดิม)       | `QT{YY}{MM}{NNN}`                     |
+เหตุผล — ธุรกิจหลักคือ**รับงานออกแบบ** ไม่ได้รับงานถอดแบบ ใบที่ส่งให้ลูกค้าจริงคือ `Estimate`
+ซึ่งมีรายการและงวดจ่ายอยู่แล้ว และถูกพิมพ์เป็น "ใบเสนอราคา" อยู่แล้ว ส่วนสาย
+`DesignTask → BOQ → Quotation` เป็นงานเสริมที่มีเฉพาะบางงาน ถ้าสร้าง QT แยกอีกใบ
+ผู้ใช้ต้องกรอกราคาชุดเดียวกันสองที่
 
-เหตุผล — ลำดับทางธุรกิจที่ถูกต้องคือ **ใบเสนอราคามาก่อน BOQ ได้ทีหลังเมื่องานอนุมัติ**
-ส่วน `Quotation` เดิมถอดจาก BOQ จึงเกิดช้ากว่า ใช้แทนกันไม่ได้
+| ชั้น                           | หน้าที่                                                                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Estimate`                     | **ที่ทำงาน** — ร่าง แก้ได้ หน้าจอเดิมที่ผู้ใช้คุ้นเคย                                                                                                   |
+| `Document` docType `QUOTATION` | **ฉบับที่ออกจริง** — เกิดจากปุ่ม "ออกใบเสนอราคา" บน Estimate, snapshot ทุกส่วนแล้วแช่แข็ง ได้เลข `QT{YY}{MM}{NNN}` เป็นต้นทางของสาย `QT → IV + BN → RC` |
 
-และสายเอกสารบัญชีต้องครบ `QT → IV + BN → RC/ใบกำกับภาษี` ตามหลักบัญชี
-ถ้าตัด QT ออกจะขาดต้นทางของสาย
+**เนื้อหาของใบเสนอราคา** — ทั้ง 3 ส่วน snapshot ไปพร้อมกันตอน confirm
 
-**ตอนนี้ทำแยกกันก่อน** ไม่เชื่อมกัน — ในอนาคตอาจเชื่อมได้ `Document` มี `quotationId`
-รองรับไว้แล้วสำหรับกรณีที่อยากอ้างกลับไปหา `Quotation` ที่ถอดจาก BOQ
+| ส่วน                       | ต้นทางใน Estimate              | snapshot ไปที่          |
+| -------------------------- | ------------------------------ | ----------------------- |
+| รายการงาน                  | `EstimateItem`                 | `DocumentItem`          |
+| งวดจ่าย — รอบ, เวลา, จำนวน | `EstimateInstallment`          | `DocumentInstallment`   |
+| Schedule แผนงาน            | `EstimateSchedulePhase` (ใหม่) | `DocumentSchedulePhase` |
 
-> **ความเสี่ยงที่ต้องจัดการ** — ผู้ใช้จะเห็นคำว่า "ใบเสนอราคา" สองที่แล้วสับสน
-> ต้องแยกให้ชัดที่ UI: เมนูบัญชีใช้คำว่า "ใบเสนอราคา" ส่วนเมนูงานออกแบบใช้
-> "ใบเสนอราคาจาก BOQ" และห้ามวางสองอย่างไว้ในหน้าเดียวกัน
+**เวลาของงวด** เขียนเป็น "**หลังจาก** {เงื่อนไข} **ภายใน** {x} สัปดาห์" — เก็บ `triggerText` +
+`withinWeeks` ไม่ผูกกับ schedule ไม่มีวันที่ตายตัว (วันครบกำหนดจริงตั้งที่ `PaymentMilestone.dueDate`
+เมื่อเงื่อนไขเกิดขึ้นแล้ว)
+
+**Schedule** เป็นของใบเสนอราคาเอง **แยกอิสระจาก `ProjectPlan`** — มีปุ่มช่วยร่างจากงวดงาน
+(แต่ละงวดกลายเป็นช่วงงานหนึ่ง ระยะเวลา = `withinWeeks` เรียงต่อกัน) แล้วแก้ต่อได้
+งวดอ้างถึงช่วงงานใน schedule ได้ แต่เป็นแค่ข้อความ ไม่ใช่ FK
+
+**สัญญา** ไม่อยู่ในตัวใบเสนอราคา — สร้างจาก template สัญญา ได้ทั้ง**พร้อม**หรือ**หลัง**ออก QT
+แล้วผูกกันในระบบ (`Contract.quotationDocId`) ใบพิมพ์ QT ไม่อ้างถึงสัญญา — ออกแบบละเอียดใน Phase 2.6
+
+**BOQ** เมื่อมีในงานใด เป็นเพียง**บรรทัดหนึ่ง**ในรายการงาน (เช่น "ค่าจัดทำ BOQ") ไม่ใช่ที่มาของราคา
+หน้า `BOQ → Quotation` เดิมคงไว้ใช้กับงานถอดแบบ ไม่อยู่ในสายบัญชีหลัก ใน UI ใช้คำว่า
+"ใบเสนอราคาจาก BOQ" เพื่อไม่ให้สับสนกับใบเสนอราคาหลัก
+
+**กฎระหว่าง Estimate กับ Document QT**
+
+- Estimate หนึ่งใบมี Document QT ได้หลายฉบับเป็นสาย revision (`-R1`, `-R2`) — `Document.estimateId`
+- แก้ Estimate หลังออก QT แล้ว → ต้องกด "ออกฉบับแก้ไข" จึงจะได้ `-R{n}` ใหม่ ฉบับเดิม `SUPERSEDED`
+- เมื่อมี Document QT แล้ว หน้าพิมพ์แสดง**เลขของ Document** แทน `Estimate.code` เพื่อให้ลูกค้าเห็นเลขชุดเดียว
+- `Estimate.status = APPROVED` (ลูกค้ารับ) ต้องมี Document QT ที่ `CONFIRMED` อยู่ — งวดเงินนำเข้าจาก snapshot ของ QT ฉบับล่าสุด ไม่ใช่จาก Estimate ที่ยังแก้ได้
 
 เลขที่เดิมที่ชนกันอยู่ (`Quotation.code` = `QT-YYYY-NNNN`, `Estimate.code` =
 `QT{YYYYMMDD}{NNN}`) ไม่ถูกแตะ — ของใหม่ใช้ `QT{YY}{MM}{NNN}` ซึ่งไม่ชนกับทั้งคู่
@@ -486,7 +513,8 @@ model Document {
 
   /// การเชื่อมโยง
   projectId       Int?
-  quotationId     Int?   /// อ้าง Quotation เดิมของระบบ (ไม่สร้าง QT ใน Document)
+  estimateId      Int?   /// QT ออกจาก Estimate ใบนี้ (§5.5) — IV/RC สืบย้อนผ่าน referenceDocId
+  quotationId     Int?   /// อ้าง Quotation จาก BOQ (ไม่บังคับ ใช้กับงานถอดแบบเท่านั้น)
   transactionId   Int?   /// สร้างอัตโนมัติเมื่อ confirm เอกสารที่เงินขยับจริง
   referenceDocId  Int?   /// IV อ้าง BN, RC อ้าง IV
   referenceNumber String?
@@ -546,6 +574,7 @@ model Document {
   customer       Customer?          @relation(fields: [customerId], references: [id])
   vendor         Vendor?            @relation(fields: [vendorId], references: [id])
   project        Project?           @relation(fields: [projectId], references: [id])
+  estimate       Estimate?          @relation(fields: [estimateId], references: [id])
   quotation      Quotation?         @relation(fields: [quotationId], references: [id])
   transaction    Transaction?       @relation(fields: [transactionId], references: [id])
   referenceDoc   Document?          @relation("DocRef", fields: [referenceDocId], references: [id])
@@ -556,6 +585,9 @@ model Document {
   revisions      Document[]         @relation("DocRevision")
   whtRateRef     WhtRate?           @relation(fields: [whtRateId], references: [id])
   items          DocumentItem[]
+  installments   DocumentInstallment[]   /// เฉพาะ QUOTATION
+  schedule       DocumentSchedulePhase[] /// เฉพาะ QUOTATION
+  contracts      Contract[]              /// เฉพาะ QUOTATION
   allocations    DocumentAllocation[] @relation("AllocFrom")
   allocatedFrom  DocumentAllocation[] @relation("AllocTo")
   whtCerts       WhtCertificate[]
@@ -569,6 +601,7 @@ model Document {
   @@unique([rootDocId, revisionNo])
   @@index([docType, status])
   @@index([projectId])
+  @@index([estimateId])
   @@index([customerId])
   @@index([documentDate])
   @@map("documents")
@@ -595,6 +628,42 @@ model DocumentItem {
   vendorMilestone  VendorMilestone?  @relation(fields: [vendorMilestoneId], references: [id])
 
   @@map("document_items")
+}
+
+/// งวดจ่ายในใบเสนอราคา — snapshot จาก EstimateInstallment ตอน confirm
+model DocumentInstallment {
+  id            Int     @id @default(autoincrement())
+  documentId    Int
+  installmentNo Int
+  description   String
+  /// "หลังจาก ..." — เงื่อนไขที่ทำให้งวดนี้ถึงกำหนด เช่น "ส่งมอบแบบร่าง"
+  triggerText   String?
+  /// "ภายใน x สัปดาห์" นับจากเงื่อนไขข้างบน
+  withinWeeks   Int?
+  percentage    Decimal @db.Decimal(5, 2)
+  amount        Decimal @db.Decimal(15, 2)
+
+  document          Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  paymentMilestones PaymentMilestone[]
+
+  @@unique([documentId, installmentNo])
+  @@map("document_installments")
+}
+
+/// Schedule ในใบเสนอราคา — snapshot จาก EstimateSchedulePhase ไม่เชื่อมกับ ProjectPlan
+model DocumentSchedulePhase {
+  id            Int     @id @default(autoincrement())
+  documentId    Int
+  name          String
+  description   String?
+  /// สัปดาห์ที่เริ่ม นับจากวันเริ่มงาน (เริ่มที่ 1)
+  startWeek     Int
+  durationWeeks Int
+  sortOrder     Int     @default(0)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_schedule_phases")
 }
 
 /// การตัดยอดระหว่างเอกสาร — RC ตัด IV ได้หลายใบ, BN รวม IV ได้หลายใบ
@@ -897,6 +966,9 @@ model PaymentMilestone {
   /// ระบบคำนวณจาก allocation — ห้ามแก้มือ
   paidAmount    Decimal @default(0)    @db.Decimal(15, 2)
 
+  /// งวดใน QT ที่งวดเงินนี้มาจาก — แทน estimateId เดิมสำหรับงานที่ออก QT แล้ว
+  documentInstallmentId Int?
+
   documentItems DocumentItem[]
   transactions  Transaction[]
 }
@@ -909,8 +981,41 @@ model Customer {
 }
 
 model Quotation {
-  // ...ของเดิม
+  // ...ของเดิม — ใบเสนอราคาจาก BOQ คงไว้ ไม่อยู่ในสายหลัก
   documents Document[]
+}
+
+model Estimate {
+  // ...ของเดิม — เป็นที่ทำงานของใบเสนอราคา (§5.5)
+  schedulePhases EstimateSchedulePhase[]
+  documents      Document[]   /// Document QT ทุก revision ที่ออกจากใบนี้
+}
+
+model EstimateInstallment {
+  // ...ของเดิม (installmentNo, description, percentage, amount)
+  triggerText String?   /// "หลังจาก ..."
+  withinWeeks Int?      /// "ภายใน x สัปดาห์"
+}
+
+/// ใหม่ — schedule ที่แก้ได้ของ Estimate ร่างจากงวดได้ด้วยปุ่มช่วย
+model EstimateSchedulePhase {
+  id            Int     @id @default(autoincrement())
+  estimateId    Int
+  name          String
+  description   String?
+  startWeek     Int
+  durationWeeks Int
+  sortOrder     Int     @default(0)
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@map("estimate_schedule_phases")
+}
+
+model Contract {
+  // ...ของเดิม — รายละเอียด template สัญญาออกแบบใน Phase 2.6
+  quotationDocId Int?   /// Document QT ที่สัญญานี้ผูกอยู่ — ไม่พิมพ์ลงใบเสนอราคา
+  quotationDoc   Document? @relation(fields: [quotationDocId], references: [id])
 }
 
 model FileAsset {
@@ -929,14 +1034,15 @@ model FileAsset {
 
 ### 7.1 Document lifecycle
 
-| การกระทำ  | กฎ                                                                                                                     |
-| --------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `create`  | สร้างเป็น `DRAFT` ยังไม่มีเลขที่ แก้ไขได้เต็มที่                                                                       |
-| `confirm` | ใน transaction เดียว: จ่ายเลข → snapshot ผู้ขาย/คู่สัญญา → ตรึงยอด → ถ้าเป็น money-flow doc สร้าง `Transaction` (§7.2) |
-| `update`  | เฉพาะ `DRAFT` สถานะอื่นแก้ได้แค่ `internalNote`                                                                        |
-| `void`    | ต้องระบุเหตุผล คงเลขที่ไว้ ถ้ามี transaction ผูกอยู่ต้อง void transaction ด้วยใน transaction เดียวกัน                  |
-| `reissue` | ออกใบใหม่เลขใหม่ ชี้ `supersedesDocId` กลับใบเก่า ใบเก่า → `SUPERSEDED`                                                |
-| `revise`  | เฉพาะ `QUOTATION` — เลขฐานเดิม + `-R{n}`, `rootDocId` ชี้ใบต้นฉบับ, `revisionNo` +1                                    |
+| การกระทำ              | กฎ                                                                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create`              | สร้างเป็น `DRAFT` ยังไม่มีเลขที่ แก้ไขได้เต็มที่                                                                                              |
+| `confirm`             | ใน transaction เดียว: จ่ายเลข → snapshot ผู้ขาย/คู่สัญญา → ตรึงยอด → ถ้าเป็น money-flow doc สร้าง `Transaction` (§7.2)                        |
+| `update`              | เฉพาะ `DRAFT` สถานะอื่นแก้ได้แค่ `internalNote`                                                                                               |
+| `void`                | ต้องระบุเหตุผล คงเลขที่ไว้ ถ้ามี transaction ผูกอยู่ต้อง void transaction ด้วยใน transaction เดียวกัน                                         |
+| `reissue`             | ออกใบใหม่เลขใหม่ ชี้ `supersedesDocId` กลับใบเก่า ใบเก่า → `SUPERSEDED`                                                                       |
+| `revise`              | เฉพาะ `QUOTATION` — เลขฐานเดิม + `-R{n}`, `rootDocId` ชี้ใบต้นฉบับ, `revisionNo` +1                                                           |
+| `issue from Estimate` | สร้าง + confirm QT ใน transaction เดียว: copy รายการ/งวด/schedule จาก Estimate → snapshot ถ้ามี QT ของ Estimate นี้อยู่แล้วให้ทำเป็น `revise` |
 
 ### 7.2 กฎการสร้าง Transaction อัตโนมัติ
 
@@ -1074,6 +1180,8 @@ GET        /document-sequences             ดูเลขล่าสุดแ�
 
 # Documents — endpoint เดียวครอบทุกประเภท
 POST       /documents                      สร้าง DRAFT { docType, ... }
+POST       /documents/from-estimate/:estimateId   ออก QT (หรือ -R{n}) จาก Estimate (§5.5)
+POST       /documents/:id/milestones       QT ที่ลูกค้ารับแล้ว → สร้าง PaymentMilestone จากงวดใน snapshot
 POST       /documents/from-milestones      สร้าง IV จากงวดเงินที่เลือก
 GET        /documents                      filter: docType, status, projectId, customerId, vendorId, dateFrom/To, search
 GET        /documents/:id
@@ -1217,17 +1325,18 @@ nav ใหม่ใน `frontend/src/components/admin/adminNav.ts`:
 
 ## 13. แผนการพัฒนา
 
-| Phase    | ขอบเขต                  | ผลลัพธ์ที่ตรวจรับได้                                                                                                                             |
-| -------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **1** ✅ | Foundation              | **เสร็จแล้ว** — ดู §13.1                                                                                                                         |
-| **2**    | Document core + **QT**  | โครง `Document` + **ใบเสนอราคา** (ต้นทางของสาย) → confirm → พิมพ์ได้ + หน้า list/detail + `print/document/[id]` + **Raw Editor** (§13.2)         |
-| **2.5**  | IV                      | ใบแจ้งหนี้ ออกจาก QT หรือจากงวดเงิน + ตัดยอด                                                                                                     |
-| **3**    | RC + Transaction        | ออกใบเสร็จ/ใบกำกับภาษี, ตัดยอด IV, รับชำระบางส่วน/หลายช่องทาง, auto-create Transaction, status ไหลถึง `PaymentMilestone`, บันทึก 50 ทวิ ที่รับมา |
-| **4**    | BN + CN/DN + revision   | ใบวางบิลรวมหลาย IV, ใบลดหนี้/เพิ่มหนี้, สาย reissue/revision                                                                                     |
-| **5**    | AP                      | Vendor + VendorContract + VendorMilestone + Transaction ฝั่งจ่าย + PV + ออก 50 ทวิ ให้ vendor                                                    |
-| **6**    | รายงาน                  | AR/AP aging, ภาษีขาย/ซื้อ, ภ.พ.30, ภ.ง.ด.3/53, งบกำไรขาดทุน, cash flow, P&L รายโครงการ, budget vs actual, export CSV                             |
-| **7**    | **Fix Cost + Forecast** | ต้นทุนคงที่รายเดือน, break-even, ราคาขั้นต่ำต่องาน — **ต้องรอ Phase 5 (AP) เสร็จก่อน** เพราะต้องมีข้อมูลรายจ่ายจริง (§15.2)                      |
-| **8**    | เก็บงาน                 | nav + สิทธิ์ ACCOUNTANT + Client Portal ดูเอกสารของตัวเอง + ส่งอีเมลผ่าน `MailModule` ที่มีอยู่ + ปิดงวดบัญชี                                    |
+| Phase    | ขอบเขต                  | ผลลัพธ์ที่ตรวจรับได้                                                                                                                                      |
+| -------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1** ✅ | Foundation              | **เสร็จแล้ว** — ดู §13.1                                                                                                                                  |
+| **2**    | Document core + **QT**  | โครง `Document` + **ออก QT จาก Estimate** (รายการ + งวด "หลังจาก…ภายใน x สัปดาห์" + schedule) → confirm/revise → พิมพ์ได้ + **Raw Editor** (§13.2, §13.3) |
+| **2.6**  | Template สัญญา          | template สัญญา → สร้างสัญญาพร้อมหรือหลังออก QT → ผูก `Contract.quotationDocId` (ไม่พิมพ์ลง QT)                                                            |
+| **2.5**  | IV                      | ใบแจ้งหนี้ ออกจาก QT หรือจากงวดเงิน + ตัดยอด                                                                                                              |
+| **3**    | RC + Transaction        | ออกใบเสร็จ/ใบกำกับภาษี, ตัดยอด IV, รับชำระบางส่วน/หลายช่องทาง, auto-create Transaction, status ไหลถึง `PaymentMilestone`, บันทึก 50 ทวิ ที่รับมา          |
+| **4**    | BN + CN/DN + revision   | ใบวางบิลรวมหลาย IV, ใบลดหนี้/เพิ่มหนี้, สาย reissue/revision                                                                                              |
+| **5**    | AP                      | Vendor + VendorContract + VendorMilestone + Transaction ฝั่งจ่าย + PV + ออก 50 ทวิ ให้ vendor                                                             |
+| **6**    | รายงาน                  | AR/AP aging, ภาษีขาย/ซื้อ, ภ.พ.30, ภ.ง.ด.3/53, งบกำไรขาดทุน, cash flow, P&L รายโครงการ, budget vs actual, export CSV                                      |
+| **7**    | **Fix Cost + Forecast** | ต้นทุนคงที่รายเดือน, break-even, ราคาขั้นต่ำต่องาน — **ต้องรอ Phase 5 (AP) เสร็จก่อน** เพราะต้องมีข้อมูลรายจ่ายจริง (§15.2)                               |
+| **8**    | เก็บงาน                 | nav + สิทธิ์ ACCOUNTANT + Client Portal ดูเอกสารของตัวเอง + ส่งอีเมลผ่าน `MailModule` ที่มีอยู่ + ปิดงวดบัญชี                                             |
 
 Phase 2–3 เป็น critical path ที่เหลือ — snapshot และกฎ auto-transaction ต้องถูกตั้งแต่ใบแรก แก้ย้อนหลังไม่ได้
 
@@ -1296,6 +1405,28 @@ Phase 2–3 เป็น critical path ที่เหลือ — snapshot แ
 
 ---
 
+### 13.3 Phase 2 — ขอบเขตหลังมติ 2026-10-08
+
+**Database** (additive ทั้งหมด)
+
+- `Document`, `DocumentItem`, `DocumentInstallment`, `DocumentSchedulePhase` + enum `DocType` `DocStatus`
+- `EstimateInstallment` + `triggerText`, `withinWeeks` · ตารางใหม่ `EstimateSchedulePhase`
+- `PaymentMilestone.documentInstallmentId`
+
+**Backend**
+
+- `POST /documents/from-estimate/:estimateId` — ออก QT / revise จาก Estimate
+- `POST /documents/:id/milestones` — นำเข้างวดเงินจาก snapshot (แทน `importFromEstimate` สำหรับงานที่ออก QT แล้ว ของเดิมยังใช้ได้กับ Estimate เก่า)
+
+**Frontend**
+
+- หน้า Estimate เดิม: ช่อง "หลังจาก… / ภายใน x สัปดาห์" ในงวด, แท็บ schedule + ปุ่ม "ร่างจากงวดงาน", ปุ่ม "ออกใบเสนอราคา" / "ออกฉบับแก้ไข"
+- หน้าพิมพ์ใบเสนอราคา: ใช้เลข Document เมื่อมี, เพิ่มตาราง schedule และคอลัมน์เวลางวด
+
+**ไม่อยู่ใน Phase 2** — template สัญญา (2.6), IV (2.5)
+
+---
+
 ## 14. ความเสี่ยงและการรับมือ
 
 | #   | ความเสี่ยง                                                                                          | การรับมือ                                                                                    |
@@ -1350,18 +1481,22 @@ pnpm exec prisma migrate diff \
 
 ### ยืนยันแล้ว
 
-|                     | มติ                                                         | อ้างอิง |
-| ------------------- | ----------------------------------------------------------- | ------- |
-| เลขที่เอกสาร        | running **3 หลัก** `{PREFIX}{YY}{MM}{NNN}`                  | §5.2    |
-| บริษัท              | **ฃวด รายเดียว** ไม่รองรับหลายบริษัท                        | §6.2    |
-| ความสัมพันธ์กับ KK  | **แยกขาด** ไม่แชร์ข้อมูลใด ๆ                                | §2      |
-| หัก ณ ที่จ่าย       | ผู้ออกเอกสารเลือกเองทุกใบ                                   | §7.4    |
-| **ใบเสนอราคา**      | **สร้าง `QUOTATION` ใน `Document` แยกจาก `Quotation` เดิม** | §5.5    |
-| **ขอบเขตโมดูล**     | **งานบัญชีล้วน ไม่ผูกกับสายงานออกแบบ/ก่อสร้าง**             | §15.1   |
-| **สายเอกสาร**       | **`QT → IV + BN → RC/ใบกำกับภาษี` ครบตามหลักบัญชี**         | §4      |
-| ผังบัญชี            | ใช้ตาม §8 ได้ ปรับเพิ่มทีหลังผ่านหน้าตั้งค่าได้อยู่แล้ว     | §8      |
-| ใบวางบิล (BN)       | **ใช้จริง** อยู่ในสายเอกสารหลัก                             | §4      |
-| Fix Cost / Forecast | **ทำหลัง AP เสร็จ**                                         | §15.2   |
+|                     | มติ                                                     | อ้างอิง |
+| ------------------- | ------------------------------------------------------- | ------- |
+| เลขที่เอกสาร        | running **3 หลัก** `{PREFIX}{YY}{MM}{NNN}`              | §5.2    |
+| บริษัท              | **ฃวด รายเดียว** ไม่รองรับหลายบริษัท                    | §6.2    |
+| ความสัมพันธ์กับ KK  | **แยกขาด** ไม่แชร์ข้อมูลใด ๆ                            | §2      |
+| หัก ณ ที่จ่าย       | ผู้ออกเอกสารเลือกเองทุกใบ                               | §7.4    |
+| **ใบเสนอราคา**      | **`Estimate` = Document QT = ใบเสนอราคา** (แทนมติเดิม)  | §5.5    |
+| เนื้อหา QT          | รายการงาน + งวด (หลังจาก…ภายใน x สัปดาห์) + schedule    | §5.5    |
+| Schedule ใน QT      | แยกอิสระจาก `ProjectPlan` ร่างจากงวดงานได้              | §5.5    |
+| สัญญา               | template แยก ผูกกับ QT ในระบบ ไม่ระบุในตัวเอกสาร        | §5.5    |
+| BOQ                 | เป็นบรรทัดหนึ่งในรายการงาน ไม่ใช่ที่มาของราคา           | §5.5    |
+| **ขอบเขตโมดูล**     | **งานบัญชีล้วน ไม่ผูกกับสายงานออกแบบ/ก่อสร้าง**         | §15.1   |
+| **สายเอกสาร**       | **`QT → IV + BN → RC/ใบกำกับภาษี` ครบตามหลักบัญชี**     | §4      |
+| ผังบัญชี            | ใช้ตาม §8 ได้ ปรับเพิ่มทีหลังผ่านหน้าตั้งค่าได้อยู่แล้ว | §8      |
+| ใบวางบิล (BN)       | **ใช้จริง** อยู่ในสายเอกสารหลัก                         | §4      |
+| Fix Cost / Forecast | **ทำหลัง AP เสร็จ**                                     | §15.2   |
 
 ### 15.1 ขอบเขต — โมดูลนี้เป็นงานบัญชีล้วน
 
@@ -1389,7 +1524,7 @@ pnpm exec prisma migrate diff \
 
 break-even รายได้   = ต้นทุนคงที่รายเดือน ÷ อัตรากำไรขั้นต้นเฉลี่ย
 
-ราคาขั้นต่ำต่องาน    = ต้นทุนตรงของงาน
+ราคาขั้นต่ำต่องาน    = ต้นทุนตรงของงาน  (ไม่ใช่ BOQ — งานออกแบบคือเวลาคน + ค่าจ้างภายนอกจาก AP)
                       + ส่วนแบ่งต้นทุนคงที่ (ตามสัดส่วนที่เลือก)
                       + กำไรเป้าหมาย
 ```

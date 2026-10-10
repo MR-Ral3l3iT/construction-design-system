@@ -4,11 +4,12 @@ import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Input, Button } from '@construction/ui'
+import { Input, Button, Textarea } from '@construction/ui'
 import { X, Save, Plus } from 'lucide-react'
 import { FormModal } from '@/components/shared/FormModal'
 import { useAddEstimateItem, useUpdateEstimateItem, type EstimateItem } from '@/hooks/useEstimates'
 import { useToast } from '@/providers/toast-provider'
+import { normalizeDescription } from '@/lib/descLines'
 
 const schema = z.object({
   name: z.string().min(1, 'กรุณากรอกชื่อรายการ'),
@@ -59,7 +60,8 @@ export function EstimateItemModal({ open, onClose, estimateId, item }: Props) {
   const unitPrice = watch('unitPrice') ?? 0
   const total = Number(quantity) * Number(unitPrice)
 
-  async function onSubmit(values: FormData) {
+  async function onSubmit(raw: FormData) {
+    const values = { ...raw, description: normalizeDescription(raw.description ?? '') }
     try {
       if (isEdit && item) {
         await updateMutation.mutateAsync({ itemId: item.id, payload: values })
@@ -99,7 +101,13 @@ export function EstimateItemModal({ open, onClose, estimateId, item }: Props) {
     >
       <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
         <Input label="ชื่อรายการ" {...register('name')} error={errors.name?.message} required />
-        <Input label="รายละเอียด" {...register('description')} />
+        {/* หลายบรรทัด — Input บรรทัดเดียวจะตัดการขึ้นบรรทัดทิ้งตอนบันทึก */}
+        <Textarea
+          label="รายละเอียด"
+          rows={4}
+          hint="1 บรรทัด = 1 รายการย่อย · ถ้ายาวใช้ปุ่ม Raw Editor ในตาราง"
+          {...register('description')}
+        />
         <div className="grid grid-cols-3 gap-3">
           <Input label="จำนวน" type="number" step="0.01" {...register('quantity')} />
           <Input label="หน่วย" {...register('unit')} placeholder="เช่น ตร.ม., งาน" />

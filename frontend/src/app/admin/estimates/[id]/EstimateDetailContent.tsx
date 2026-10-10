@@ -16,6 +16,7 @@ import {
   FilePen,
   Ban,
   Printer,
+  List,
 } from 'lucide-react'
 import { Card, CardBody, Button, Table } from '@construction/ui'
 import { StatusBadge } from '@/components/shared/StatusBadge'
@@ -26,9 +27,11 @@ import { ImportSubQuotationModal } from '../ImportSubQuotationModal'
 import { IssueQuotationModal } from './IssueQuotationModal'
 import { VoidQuotationModal } from './VoidQuotationModal'
 import { ScheduleEditor } from './ScheduleEditor'
+import { DescriptionRawEditor } from './DescriptionRawEditor'
 import {
   useEstimate,
   useDeleteEstimateItem,
+  useUpdateEstimateItem,
   useUpsertInstallments,
   type EstimateItem,
   type EstimateInstallment,
@@ -272,6 +275,8 @@ export function EstimateDetailContent({ id, projectId }: Props) {
   const qc = useQueryClient()
   const { data: estimate, isLoading } = useEstimate(id)
   const deleteItem = useDeleteEstimateItem(id)
+  const updateItem = useUpdateEstimateItem(id)
+  const [rawEditItem, setRawEditItem] = useState<EstimateItem | null>(null)
 
   const [editEstimateOpen, setEditEstimateOpen] = useState(false)
   const [itemModalOpen, setItemModalOpen] = useState(false)
@@ -335,7 +340,9 @@ export function EstimateDetailContent({ id, projectId }: Props) {
       render: (item: EstimateItem) => (
         <div>
           <p className="font-medium text-gray-900">{item.name}</p>
-          {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
+          {item.description && (
+            <p className="whitespace-pre-wrap text-xs text-gray-500">{item.description}</p>
+          )}
         </div>
       ),
     },
@@ -372,6 +379,14 @@ export function EstimateDetailContent({ id, projectId }: Props) {
             header: '',
             render: (item: EstimateItem) => (
               <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title="แก้รายละเอียดเป็นข้อความ (Raw Editor)"
+                  onClick={() => setRawEditItem(item)}
+                >
+                  <List className="h-3 w-3" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -669,6 +684,23 @@ export function EstimateDetailContent({ id, projectId }: Props) {
         estimateId={id}
         projectId={projectId}
       />
+      {rawEditItem && (
+        <DescriptionRawEditor
+          itemName={rawEditItem.name}
+          description={rawEditItem.description ?? ''}
+          saving={updateItem.isPending}
+          onClose={() => setRawEditItem(null)}
+          onApply={async (description) => {
+            try {
+              await updateItem.mutateAsync({ itemId: rawEditItem.id, payload: { description } })
+              success('อัปเดตรายละเอียดสำเร็จ')
+              setRawEditItem(null)
+            } catch {
+              toastError('เกิดข้อผิดพลาด — รายละเอียดยังไม่ถูกบันทึก')
+            }
+          }}
+        />
+      )}
       <IssueQuotationModal
         open={issueOpen}
         onClose={() => setIssueOpen(false)}

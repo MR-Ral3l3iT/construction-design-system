@@ -242,7 +242,7 @@ function EstimateDoc({
                 <div style={{ fontWeight: 500 }}>{item.name}</div>
                 {item.description && (
                   <div
-                    style={{ color: '#555', fontSize: 11.5, whiteSpace: 'pre-line', marginTop: 2 }}
+                    style={{ color: '#555', fontSize: 11.5, whiteSpace: 'pre-wrap', marginTop: 2 }}
                   >
                     {item.description}
                   </div>

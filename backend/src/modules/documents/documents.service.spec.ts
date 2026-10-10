@@ -19,6 +19,12 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
   let service: DocumentsService
   let projectId: number
   const ACTOR = 1
+  // งวดของเลขที่ที่ไม่ชนกับ suite อื่น — ทุกใบในไฟล์นี้ออกด้วยวันที่นี้
+  const DOC_DATE = '2030-01-15'
+  const issue = (
+    estimateId: number,
+    dto: Parameters<DocumentsService['issueFromEstimate']>[1] = {},
+  ) => service.issueFromEstimate(estimateId, { documentDate: DOC_DATE, ...dto }, ACTOR)
 
   beforeAll(async () => {
     prisma = new PrismaClient({ datasources: { db: { url: TEST_DB } } })
@@ -31,6 +37,17 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
       new DocumentSequenceService(db),
       log,
     )
+
+    // รันซ้ำบน DB เดิมได้ — ล้างของที่ไฟล์นี้สร้างไว้รอบก่อน
+    await prisma.paymentMilestone.deleteMany({
+      where: { documentInstallment: { document: { code: { startsWith: 'QT3001' } } } },
+    })
+    await prisma.document.updateMany({
+      where: { code: { startsWith: 'QT3001' } },
+      data: { supersedesDocId: null, rootDocId: null },
+    })
+    await prisma.document.deleteMany({ where: { code: { startsWith: 'QT3001' } } })
+    await prisma.documentSequence.deleteMany({ where: { period: '3001' } })
 
     await prisma.companyProfile.upsert({
       where: { code: 'UAT' },
@@ -95,9 +112,9 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('ออก QT: snapshot ครบ ยอดคำนวณด้วย Decimal และ Estimate เป็น SENT', async () => {
     const est = await makeEstimate()
-    const doc = await service.issueFromEstimate(est.id, { vatPercent: 7 }, ACTOR)
+    const doc = await issue(est.id, { vatPercent: 7 })
 
-    expect(doc.code).toMatch(/^QT\d{4}\d{3}$/)
+    expect(doc.code).toMatch(/^QT3001\d{3}$/)
     expect(doc.status).toBe('CONFIRMED')
     expect(doc.revisionNo).toBe(0)
     expect(doc.partyName).toBe('บริษัท ลูกค้า จำกัด')
@@ -121,7 +138,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('snapshot ไม่เปลี่ยนตามเมื่อแก้ Estimate ทีหลัง', async () => {
     const est = await makeEstimate()
-    const doc = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const doc = await issue(est.id)
 
     await prisma.estimateItem.updateMany({
       where: { estimateId: est.id },
@@ -135,13 +152,13 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('ออกซ้ำหลังแก้ → -R1 เลขฐานเดิม ฉบับเก่า SUPERSEDED', async () => {
     const est = await makeEstimate()
-    const first = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const first = await issue(est.id)
 
     await prisma.estimate.update({ where: { id: est.id }, data: { status: 'DRAFT' } })
-    const r1 = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const r1 = await issue(est.id)
 
     await prisma.estimate.update({ where: { id: est.id }, data: { status: 'DRAFT' } })
-    const r2 = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const r2 = await issue(est.id)
 
     expect(r1.code).toBe(`${first.code}-R1`)
     expect(r2.code).toBe(`${first.code}-R2`)
@@ -154,10 +171,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('กดออกพร้อมกันสองครั้ง → ได้ใบเดียว อีกครั้งถูกปฏิเสธ', async () => {
     const est = await makeEstimate()
-    const results = await Promise.allSettled([
-      service.issueFromEstimate(est.id, {}, ACTOR),
-      service.issueFromEstimate(est.id, {}, ACTOR),
-    ])
+    const results = await Promise.allSettled([issue(est.id), issue(est.id)])
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     expect(await prisma.document.count({ where: { estimateId: est.id } })).toBe(1)
@@ -165,14 +179,14 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('ปฏิเสธเมื่อสัดส่วนงวดรวมไม่เท่ากับ 100% และไม่กินเลข', async () => {
     const est = await makeEstimate(['50', '40'])
-    await expect(service.issueFromEstimate(est.id, {}, ACTOR)).rejects.toThrow('100%')
+    await expect(issue(est.id)).rejects.toThrow('100%')
     expect(await prisma.document.count({ where: { estimateId: est.id } })).toBe(0)
   })
 
   it('ปฏิเสธเมื่อ Estimate ไม่ใช่ร่าง', async () => {
     const est = await makeEstimate()
-    await service.issueFromEstimate(est.id, {}, ACTOR)
-    await expect(service.issueFromEstimate(est.id, {}, ACTOR)).rejects.toThrow('สถานะร่าง')
+    await issue(est.id)
+    await expect(issue(est.id)).rejects.toThrow('สถานะร่าง')
   })
 
   it('หัก ณ ที่จ่ายคิดจากฐานก่อน VAT และ print-data มียอดต่องวด', async () => {
@@ -182,7 +196,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
       create: { code: 'TEST3', rate: 0.03, description: 'ค่าบริการ 3%' },
     })
     const est = await makeEstimate(['100'])
-    const doc = await service.issueFromEstimate(est.id, { whtRateId: wht.id }, ACTOR)
+    const doc = await issue(est.id, { whtRateId: wht.id })
 
     expect(doc.whtAmount.toFixed(2)).toBe('4500.00')
     expect(doc.netAmount.toFixed(2)).toBe('156000.00')
@@ -194,7 +208,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('นำเข้างวดเงินจาก snapshot หลังลูกค้าอนุมัติ และนำเข้าซ้ำได้ไม่ซ้อน', async () => {
     const est = await makeEstimate()
-    const doc = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const doc = await issue(est.id)
 
     await expect(service.importMilestones(doc.id, ACTOR)).rejects.toThrow('ยังไม่อนุมัติ')
 
@@ -214,7 +228,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('ยกเลิก QT: ลบงวดที่ยังไม่รับเงิน และ Estimate กลับเป็นร่าง', async () => {
     const est = await makeEstimate()
-    const doc = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const doc = await issue(est.id)
     await prisma.estimate.update({ where: { id: est.id }, data: { status: 'APPROVED' } })
     await service.importMilestones(doc.id, ACTOR)
 
@@ -232,7 +246,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('ยกเลิกไม่ได้ถ้ามีงวดที่รับเงินแล้ว', async () => {
     const est = await makeEstimate()
-    const doc = await service.issueFromEstimate(est.id, {}, ACTOR)
+    const doc = await issue(est.id)
     await prisma.estimate.update({ where: { id: est.id }, data: { status: 'APPROVED' } })
     await service.importMilestones(doc.id, ACTOR)
     await prisma.paymentMilestone.updateMany({

@@ -67,8 +67,9 @@ describeDb('DocumentSequenceService (ต้องมี TEST_DATABASE_URL)', () 
     await prisma.$disconnect()
   })
 
+  // ลบเฉพาะงวดที่เทสนี้ใช้ — suite อื่นที่ออกเอกสารจริงใช้ DB เดียวกันอยู่
   beforeEach(async () => {
-    await prisma.documentSequence.deleteMany({})
+    await prisma.documentSequence.deleteMany({ where: { period: { in: ['2609', '2610'] } } })
   })
 
   it('จ่ายเลขไม่ซ้ำและต่อเนื่องเมื่อยิง 60 ครั้งพร้อมกัน', async () => {

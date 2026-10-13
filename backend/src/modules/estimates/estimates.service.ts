@@ -26,6 +26,7 @@ import {
 } from '../../common/utils/money.util'
 import { resolveLines } from './item-lines'
 import { CompanyService } from '../company/company.service'
+import { planInstallmentsByNet } from '../documents/quotation.util'
 
 const ITEM_SELECT = {
   id: true,
@@ -411,7 +412,13 @@ export class EstimatesService {
       vatRate,
       whtRate: estimate.whtPercent ? D(estimate.whtPercent).dividedBy(100) : 0,
     })
-    return { ...estimate, summary }
+    // ยอดชำระของแต่ละงวดตามที่บันทึกไว้ — วิธีเดียวกับตอนออกใบเสนอราคา (% ของยอดสุทธิ)
+    const installmentPlan = planInstallmentsByNet(
+      summary,
+      estimate.installments.map((i) => i.percentage),
+      false,
+    )
+    return { ...estimate, summary, installmentPlan }
   }
 
   async update(id: number, dto: UpdateEstimateDto, actorId: number) {

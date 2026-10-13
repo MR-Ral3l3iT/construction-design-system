@@ -62,11 +62,17 @@ const inputCls =
 function InstallmentsEditor({
   estimateId,
   totalAmount,
+  netAmount,
+  plan,
   installments,
   readOnly,
 }: {
   estimateId: number
   totalAmount: number
+  /** ยอดสุทธิที่ลูกค้าจ่ายจริงของทั้งใบ — % ของงวดคิดจากยอดนี้ */
+  netAmount: number
+  /** ยอดชำระของแต่ละงวดจาก backend ตามที่บันทึกไว้ */
+  plan: { netAmount: string }[]
   installments: EstimateInstallment[]
   readOnly: boolean
 }) {
@@ -77,6 +83,23 @@ function InstallmentsEditor({
   useEffect(() => {
     setRows(toInstallmentRows(installments))
   }, [installments])
+
+  /**
+   * ยอดที่ลูกค้าจ่ายในงวด — แถวที่ยังไม่ได้แก้ใช้ยอดจาก backend (วิธีเดียวกับใบเสนอราคา
+   * งวดสุดท้ายรับเศษ) · แถวที่กำลังแก้แสดงค่าประมาณ % × ยอดสุทธิ จนกว่าจะกดบันทึก
+   */
+  function payAmount(idx: number, pct: string) {
+    const fmt = (n: number) =>
+      new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+        n,
+      )
+    const saved = installments[idx]
+    if (saved && plan[idx] && Number(saved.percentage) === Number(pct)) {
+      return fmt(Number(plan[idx].netAmount))
+    }
+    const p = parseFloat(pct)
+    return isNaN(p) ? '-' : `≈ ${fmt(Math.round(netAmount * p) / 100)}`
+  }
 
   function calcAmount(pct: string) {
     const p = parseFloat(pct)
@@ -127,7 +150,7 @@ function InstallmentsEditor({
               <th className="pb-2 pr-2 font-medium">รายละเอียด</th>
               <th className="pb-2 pr-2 font-medium w-24">ภายใน (สัปดาห์)</th>
               <th className="pb-2 pr-2 font-medium w-24">สัดส่วน (%)</th>
-              <th className="pb-2 pr-2 font-medium w-32 text-right">จำนวนเงิน</th>
+              <th className="pb-2 pr-2 font-medium w-36 text-right">ยอดชำระ (สุทธิ)</th>
               {!readOnly && <th className="pb-2 w-8" />}
             </tr>
           </thead>
@@ -178,9 +201,7 @@ function InstallmentsEditor({
                   )}
                 </td>
                 <td className="py-1.5 pr-2 text-right align-middle font-medium">
-                  {new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2 }).format(
-                    calcAmount(row.percentage),
-                  )}
+                  {payAmount(idx, row.percentage)}
                 </td>
                 {!readOnly && (
                   <td className="py-1.5 align-middle">
@@ -593,6 +614,8 @@ export function EstimateDetailContent({ id, projectId }: Props) {
           <InstallmentsEditor
             estimateId={id}
             totalAmount={estimate.totalAmount}
+            netAmount={Number(estimate.summary?.netAmount ?? estimate.totalAmount)}
+            plan={estimate.installmentPlan ?? []}
             installments={installments}
             readOnly={scheduleLocked}
           />

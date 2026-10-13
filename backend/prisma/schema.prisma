@@ -1410,8 +1410,12 @@ model DocumentInstallment {
   description   String
   withinWeeks   Int?
   percentage    Decimal @db.Decimal(5, 2)
-  /// ยอดก่อน VAT — ภาษีของงวดคำนวณตอนออกใบแจ้งหนี้
+  /// ราคาก่อน VAT ของงวด
   amount        Decimal @db.Decimal(15, 2)
+  vatAmount     Decimal @default(0) @db.Decimal(15, 2)
+  whtAmount     Decimal @default(0) @db.Decimal(15, 2)
+  /// ยอดที่ลูกค้าจ่ายจริงในงวดนี้ = % × ยอดสุทธิของเอกสาร (ดู planInstallmentsByNet)
+  netAmount     Decimal @default(0) @db.Decimal(15, 2)
 
   document          Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
   paymentMilestones PaymentMilestone[]

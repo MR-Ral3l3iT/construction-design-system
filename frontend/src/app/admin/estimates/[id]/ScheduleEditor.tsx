@@ -24,21 +24,23 @@ const toRows = (phases: EstimateSchedulePhase[]): Row[] =>
   }))
 
 /**
- * ร่าง schedule จากงวดงาน — แต่ละงวดเป็นช่วงงานหนึ่ง เรียงต่อกัน
- * ระยะเวลา = "ภายใน x สัปดาห์" ของงวดนั้น (ไม่ระบุ = 1 สัปดาห์)
+ * ร่าง schedule จากงวดงาน — งวดที่ระบุ "ภายใน x สัปดาห์" เป็นช่วงงานหนึ่ง เรียงต่อกัน
+ * งวดที่ไม่ระบุสัปดาห์ (เช่น "เมื่อลงนามว่าจ้าง") ไม่ใช่ช่วงทำงาน จึงข้ามไป
  */
 function draftFromInstallments(installments: EstimateInstallment[]): Row[] {
   let start = 1
-  return installments.map((inst) => {
-    const duration = inst.withinWeeks && inst.withinWeeks > 0 ? inst.withinWeeks : 1
-    const row = {
-      name: inst.description || `งวดที่ ${inst.installmentNo}`,
-      startWeek: String(start),
-      durationWeeks: String(duration),
-    }
-    start += duration
-    return row
-  })
+  return installments
+    .filter((inst) => inst.withinWeeks && inst.withinWeeks > 0)
+    .map((inst) => {
+      const duration = inst.withinWeeks as number
+      const row = {
+        name: inst.description || `งวดที่ ${inst.installmentNo}`,
+        startWeek: String(start),
+        durationWeeks: String(duration),
+      }
+      start += duration
+      return row
+    })
 }
 
 interface Props {

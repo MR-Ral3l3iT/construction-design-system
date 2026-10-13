@@ -1,4 +1,10 @@
-import { allocateInstallments, installmentTimingText, revisionCode } from './quotation.util'
+import { calcTax } from '../../common/utils/money.util'
+import {
+  allocateInstallments,
+  installmentTimingText,
+  planInstallmentsByNet,
+  revisionCode,
+} from './quotation.util'
 
 describe('allocateInstallments', () => {
   it('แบ่งตามสัดส่วนเมื่อหารลงตัว', () => {
@@ -44,5 +50,51 @@ describe('installmentTimingText', () => {
     expect(installmentTimingText(2)).toBe('ภายใน 2 สัปดาห์')
     expect(installmentTimingText(null)).toBe('')
     expect(installmentTimingText(0)).toBe('')
+  })
+})
+
+describe('planInstallmentsByNet', () => {
+  const totals = calcTax({ subtotal: '173076.92', vatRate: 0.07, whtRate: 0.03 }) // สุทธิ 179,999.99
+
+  it('ยอดสุทธิของงวด = % ของยอดสุทธิเอกสาร และทุกคอลัมน์รวมได้เท่าเอกสาร', () => {
+    const rows = planInstallmentsByNet(totals, ['30', '35', '20', '15'])
+    expect(rows.map((r) => r.netAmount.toFixed(2))).toEqual([
+      '54000.00',
+      '63000.00',
+      '36000.00',
+      '26999.99', // งวดสุดท้ายรับเศษ: 179,999.99 − 153,000.00
+    ])
+    const total = (k: 'amount' | 'vatAmount' | 'whtAmount' | 'netAmount') =>
+      rows.reduce((a, r) => a.plus(r[k]), totals.baseAmount.minus(totals.baseAmount)).toFixed(2)
+    expect(total('amount')).toBe(totals.baseAmount.toFixed(2))
+    expect(total('vatAmount')).toBe(totals.vatAmount.toFixed(2))
+    expect(total('whtAmount')).toBe(totals.whtAmount.toFixed(2))
+    expect(total('netAmount')).toBe(totals.netAmount.toFixed(2))
+  })
+
+  it('VAT และหัก ณ ที่จ่ายของงวดห่างจากสูตรไม่เกิน 1 สตางค์ (ราคาก่อน VAT รับส่วนต่างจากการปัด)', () => {
+    for (const r of planInstallmentsByNet(totals, ['30', '35', '20', '15']).slice(0, -1)) {
+      const exact = calcTax({ subtotal: r.amount, vatRate: 0.07, whtRate: 0.03 })
+      expect(exact.vatAmount.minus(r.vatAmount).abs().lessThanOrEqualTo(0.01)).toBe(true)
+      expect(exact.whtAmount.minus(r.whtAmount).abs().lessThanOrEqualTo(0.01)).toBe(true)
+    }
+  })
+
+  it('แต่ละงวด ราคา + VAT − หัก = สุทธิ', () => {
+    for (const r of planInstallmentsByNet(totals, ['30', '35', '20', '15'])) {
+      expect(r.amount.plus(r.vatAmount).minus(r.whtAmount).toFixed(2)).toBe(r.netAmount.toFixed(2))
+    }
+  })
+
+  it('ไม่หัก ณ ที่จ่าย → สุทธิ = ยอดรวม VAT', () => {
+    const t = calcTax({ subtotal: 100000, vatRate: 0.07 })
+    const rows = planInstallmentsByNet(t, ['50', '50'])
+    expect(rows.map((r) => r.netAmount.toFixed(2))).toEqual(['53500.00', '53500.00'])
+    expect(rows.every((r) => r.whtAmount.isZero())).toBe(true)
+  })
+
+  it('ออกจริงต้องครบ 100% · preview แบ่งตาม % ได้แม้ไม่ครบ', () => {
+    expect(() => planInstallmentsByNet(totals, ['50', '40'])).toThrow('100%')
+    expect(planInstallmentsByNet(totals, ['50', '40'], false)).toHaveLength(2)
   })
 })

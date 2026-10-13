@@ -331,4 +331,44 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
     expect(doc.whtAmount.toFixed(2)).toBe('2250.00')
     expect(doc.whtRateId).toBeNull()
   })
+
+  it('งวดคิดจาก % ของยอดสุทธิ — ใบ P2612 (สุทธิ 179,999.99, งวด 30/35/20/15)', async () => {
+    const est = await prisma.estimate.create({
+      data: {
+        projectId,
+        code: `EST-NET-${Date.now()}`,
+        title: 'P2612',
+        whtPercent: 3,
+        items: {
+          create: [{ name: 'ออกแบบ', quantity: 1, unitPrice: 173076.92, totalPrice: 173076.92 }],
+        },
+        installments: {
+          create: ['30', '35', '20', '15'].map((p, i) => ({
+            installmentNo: i + 1,
+            description: `งวด ${i + 1}`,
+            withinWeeks: i === 0 ? null : 3,
+            percentage: p,
+            amount: 0,
+          })),
+        },
+      },
+    })
+    const doc = await issue(est.id)
+
+    expect(doc.netAmount.toFixed(2)).toBe('179999.99')
+    expect(doc.installments.map((i) => i.netAmount.toFixed(2))).toEqual([
+      '54000.00',
+      '63000.00',
+      '36000.00',
+      '26999.99',
+    ])
+    const col = (k: 'amount' | 'vatAmount' | 'whtAmount') =>
+      doc.installments.reduce((a, i) => a + Number(i[k]), 0).toFixed(2)
+    expect(col('amount')).toBe(doc.baseAmount.toFixed(2))
+    expect(col('vatAmount')).toBe(doc.vatAmount.toFixed(2))
+    expect(col('whtAmount')).toBe(doc.whtAmount.toFixed(2))
+
+    const print = await service.printData(doc.id)
+    expect(print.installments[0].timingText).toBe('') // งวดแรกไม่ระบุสัปดาห์
+  })
 })

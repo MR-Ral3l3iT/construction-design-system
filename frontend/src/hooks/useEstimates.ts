@@ -83,6 +83,8 @@ export interface Estimate {
     whtAmount: string
     netAmount: string
   }
+  /** ยอดของแต่ละงวดตามที่บันทึกไว้ — % ของยอดสุทธิ (มีเฉพาะ GET /estimates/:id) */
+  installmentPlan?: { amount: string; vatAmount: string; whtAmount: string; netAmount: string }[]
   createdAt: string
   updatedAt: string
   project?: { id: number; code: string; name: string; customer?: EstimateCustomer | null }

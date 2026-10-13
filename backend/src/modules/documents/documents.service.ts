@@ -6,13 +6,18 @@ import {
 } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { ActivityLogService } from '../../common/services/activity-log.service'
-import { calcLineAmount, calcTax, D, round2, round4, sum } from '../../common/utils/money.util'
+import { calcLineAmount, calcTax, D, round4, sum } from '../../common/utils/money.util'
 import { buildPaginationMeta, paginationSkipTake } from '../../common/utils/pagination.util'
 import { PrismaService } from '../../database/prisma.service'
 import { CompanyService } from '../company/company.service'
 import { DocumentSequenceService } from '../company/document-sequence.service'
 import { IssueQuotationDto, ListDocumentsQueryDto } from './dto/documents.dto'
-import { allocateInstallments, installmentTimingText, revisionCode } from './quotation.util'
+import {
+  installmentTimingText,
+  InstallmentPlanRow,
+  planInstallmentsByNet,
+  revisionCode,
+} from './quotation.util'
 
 const DOCUMENT_LIST_SELECT = {
   id: true,
@@ -86,6 +91,9 @@ const DOCUMENT_DETAIL_SELECT = {
       withinWeeks: true,
       percentage: true,
       amount: true,
+      vatAmount: true,
+      whtAmount: true,
+      netAmount: true,
     },
   },
   schedule: {
@@ -190,13 +198,14 @@ function buildQuotation(estimate: EstimateForQuotation, tax: TaxSettings, strict
 
   const warnings: string[] = []
   const pcts = estimate.installments.map((i) => i.percentage)
-  let amounts: Prisma.Decimal[]
+  // งวดคิดจาก % ของยอดสุทธิที่ลูกค้าจ่ายจริง (§13.7)
+  let plan: InstallmentPlanRow[]
   try {
-    amounts = allocateInstallments(totals.baseAmount, pcts)
+    plan = planInstallmentsByNet(totals, pcts)
   } catch (e) {
     if (strict) throw new BadRequestException((e as Error).message)
     warnings.push((e as Error).message)
-    amounts = pcts.map((p) => round2(totals.baseAmount.times(D(p)).dividedBy(100)))
+    plan = planInstallmentsByNet(totals, pcts, false)
   }
   if (items.length === 0) {
     if (strict) throw new BadRequestException('ใบประเมินยังไม่มีรายการ')
@@ -226,7 +235,7 @@ function buildQuotation(estimate: EstimateForQuotation, tax: TaxSettings, strict
     description: inst.description,
     withinWeeks: inst.withinWeeks,
     percentage: inst.percentage,
-    amount: amounts[idx],
+    ...plan[idx],
   }))
   const schedule = estimate.schedulePhases.map((ph, idx) => ({
     name: ph.name,
@@ -468,24 +477,16 @@ export class DocumentsService {
     T extends {
       vatRate: Prisma.Decimal
       whtRate: Prisma.Decimal
-      installments: Array<{
-        amount: Prisma.Decimal
-        withinWeeks: number | null
-      }>
+      installments: Array<{ withinWeeks: number | null }>
     },
   >(doc: T, seller: { logoUrl: string | null; signatureName: string | null }) {
+    // ยอดของแต่ละงวดมาจาก snapshot (หรือ buildQuotation ตอน preview) ไม่คำนวณใหม่ที่นี่
     return {
       ...doc,
-      installments: doc.installments.map((inst) => {
-        const t = calcTax({ subtotal: inst.amount, vatRate: doc.vatRate, whtRate: doc.whtRate })
-        return {
-          ...inst,
-          timingText: installmentTimingText(inst.withinWeeks),
-          vatAmount: t.vatAmount,
-          whtAmount: t.whtAmount,
-          netAmount: t.netAmount,
-        }
-      }),
+      installments: doc.installments.map((inst) => ({
+        ...inst,
+        timingText: installmentTimingText(inst.withinWeeks),
+      })),
       // โลโก้และลายเซ็นใช้ของปัจจุบัน ไม่ใช่ข้อมูลทางบัญชีจึงไม่ต้อง snapshot
       sellerLogoUrl: seller.logoUrl,
       sellerSignatureName: seller.signatureName,
@@ -663,7 +664,8 @@ export class DocumentsService {
             estimateId,
             documentInstallmentId: inst.id,
             title: `งวดที่ ${inst.installmentNo}: ${inst.description}`,
-            description: `จากใบเสนอราคา ${doc.code} (${inst.percentage}%)${timing ? ` — ${timing}` : ''}`,
+            // amount ของงวดเงินคือราคาก่อน VAT · ยอดที่ลูกค้าจ่ายจริงแนบไว้ในคำอธิบาย
+            description: `จากใบเสนอราคา ${doc.code} (${inst.percentage}%) ยอดชำระ ${Number(inst.netAmount).toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท${timing ? ` — ${timing}` : ''}`,
             amount: inst.amount,
             sortOrder: inst.installmentNo,
           }

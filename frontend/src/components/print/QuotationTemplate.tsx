@@ -372,11 +372,11 @@ export function QuotationTemplate({
                   งวดที่
                 </th>
                 <th style={{ ...S.thDark, textAlign: 'left' }}>รายละเอียด</th>
-                <th style={{ ...S.thDark, textAlign: 'left', width: 120 }}>ระยะเวลา</th>
+                <th style={{ ...S.thDark, textAlign: 'left', width: 130 }}>ระยะเวลา</th>
                 <th style={{ ...S.thDark, textAlign: 'right', width: 56 }}>%</th>
-                <th style={{ ...S.thDark, textAlign: 'right', width: 110 }}>จำนวนเงิน</th>
-                <th style={{ ...S.thDark, textAlign: 'right', width: 110 }}>
-                  {hasWht ? 'ยอดชำระสุทธิ' : 'รวม VAT'}
+                {/* % คิดจากยอดที่ลูกค้าจ่ายจริง จึงแสดงยอดชำระอย่างเดียว ไม่แสดงราคาก่อน VAT */}
+                <th style={{ ...S.thDark, textAlign: 'right', width: 120 }}>
+                  {hasWht ? 'ยอดชำระสุทธิ' : 'ยอดชำระ'}
                 </th>
               </tr>
             </thead>
@@ -389,7 +389,6 @@ export function QuotationTemplate({
                   <td style={{ ...S.td, textAlign: 'right' }}>
                     {Number(inst.percentage).toFixed(2)}
                   </td>
-                  <td style={{ ...S.td, textAlign: 'right' }}>{fmt(inst.amount)}</td>
                   <td style={{ ...S.td, textAlign: 'right', fontWeight: 600 }}>
                     {fmt(inst.netAmount)}
                   </td>

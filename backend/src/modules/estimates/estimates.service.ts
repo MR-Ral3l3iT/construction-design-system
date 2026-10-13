@@ -8,14 +8,19 @@ import {
   CreateEstimateItemDto,
   EstimateInstallmentDto,
   EstimateSchedulePhaseDto,
+  UpdateEstimateItemDto,
 } from './dto/create-estimate.dto'
 import { UpdateEstimateDto, UpdateEstimateStatusDto } from './dto/update-estimate.dto'
 import { PaginationDto } from '../../common/dto/pagination.dto'
+import { calcLineAmount, sum } from '../../common/utils/money.util'
+import { resolveLines } from './item-lines'
 
 const ITEM_SELECT = {
   id: true,
   name: true,
   description: true,
+  lines: true,
+  isPriced: true,
   quantity: true,
   unit: true,
   unitPrice: true,
@@ -23,6 +28,27 @@ const ITEM_SELECT = {
   sortOrder: true,
   subQuotationId: true,
 } satisfies Prisma.EstimateItemSelect
+
+/** ยอดของรายการ — หัวข้อที่ไม่มีราคาเป็น 0 เสมอ ไม่ว่าจะกรอกราคาค้างไว้หรือไม่ */
+function itemTotal(isPriced: boolean, quantity: string, unitPrice: string) {
+  return isPriced ? calcLineAmount(quantity, unitPrice) : calcLineAmount(0, 0)
+}
+
+/** ค่าที่บันทึกของรายการใหม่ — ใช้ร่วมกันทุกทางที่สร้างรายการ */
+function newItemData(item: CreateEstimateItemDto, idx: number) {
+  const isPriced = item.isPriced ?? true
+  const quantity = item.quantity ?? '1'
+  return {
+    name: item.name,
+    ...(resolveLines(item) ?? { description: null }),
+    isPriced,
+    quantity,
+    unit: item.unit,
+    unitPrice: item.unitPrice,
+    totalPrice: itemTotal(isPriced, quantity, item.unitPrice),
+    sortOrder: item.sortOrder ?? idx,
+  }
+}
 
 const ESTIMATE_SELECT = {
   id: true,
@@ -113,11 +139,7 @@ export class EstimatesService {
   ) {}
 
   private calcTotal(items: CreateEstimateItemDto[]) {
-    return items.reduce((sum, item) => {
-      const qty = parseFloat(item.quantity ?? '1')
-      const price = parseFloat(item.unitPrice)
-      return sum + qty * price
-    }, 0)
+    return sum(items.map((item, idx) => newItemData(item, idx).totalPrice))
   }
 
   private async generateQTCode(): Promise<string> {
@@ -147,17 +169,9 @@ export class EstimatesService {
         title: dto.title,
         description: dto.description,
         projectId: dto.projectId,
-        totalAmount: totalAmount.toString(),
+        totalAmount,
         items: {
-          create: items.map((item, idx) => ({
-            name: item.name,
-            description: item.description,
-            quantity: item.quantity ?? '1',
-            unit: item.unit,
-            unitPrice: item.unitPrice,
-            totalPrice: (parseFloat(item.quantity ?? '1') * parseFloat(item.unitPrice)).toString(),
-            sortOrder: item.sortOrder ?? idx,
-          })),
+          create: items.map((item, idx) => newItemData(item, idx)),
         },
       },
       select: ESTIMATE_SELECT,
@@ -320,20 +334,10 @@ export class EstimatesService {
         data: {
           title: dto.title,
           description: dto.description,
-          ...(totalAmount !== undefined && { totalAmount: totalAmount.toString() }),
+          ...(totalAmount !== undefined && { totalAmount }),
           ...(items && {
             items: {
-              create: items.map((item, idx) => ({
-                name: item.name,
-                description: item.description,
-                quantity: item.quantity ?? '1',
-                unit: item.unit,
-                unitPrice: item.unitPrice,
-                totalPrice: (
-                  parseFloat(item.quantity ?? '1') * parseFloat(item.unitPrice)
-                ).toString(),
-                sortOrder: item.sortOrder ?? idx,
-              })),
+              create: items.map((item, idx) => newItemData(item, idx)),
             },
           }),
         },
@@ -392,19 +396,12 @@ export class EstimatesService {
       throw new BadRequestException('เพิ่มรายการได้เฉพาะใบประเมินสถานะ DRAFT')
     }
 
-    const totalPrice = parseFloat(dto.quantity ?? '1') * parseFloat(dto.unitPrice)
     const maxOrder = await this.prisma.estimateItem.count({ where: { estimateId } })
 
     const item = await this.prisma.estimateItem.create({
       data: {
         estimateId,
-        name: dto.name,
-        description: dto.description,
-        quantity: dto.quantity ?? '1',
-        unit: dto.unit,
-        unitPrice: dto.unitPrice,
-        totalPrice: totalPrice.toString(),
-        sortOrder: dto.sortOrder ?? maxOrder,
+        ...newItemData(dto, maxOrder),
         ...(dto.subQuotationId ? { subQuotationId: dto.subQuotationId } : {}),
       },
       select: ITEM_SELECT,
@@ -414,7 +411,7 @@ export class EstimatesService {
     return item
   }
 
-  async updateItem(estimateId: number, itemId: number, dto: Partial<CreateEstimateItemDto>) {
+  async updateItem(estimateId: number, itemId: number, dto: UpdateEstimateItemDto) {
     const estimate = await this.findOne(estimateId)
     if (estimate.status !== 'DRAFT') {
       throw new BadRequestException('แก้ไขรายการได้เฉพาะใบประเมินสถานะ DRAFT')
@@ -423,19 +420,20 @@ export class EstimatesService {
     const item = await this.prisma.estimateItem.findFirst({ where: { id: itemId, estimateId } })
     if (!item) throw new NotFoundException('ไม่พบรายการ')
 
+    const isPriced = dto.isPriced ?? item.isPriced
     const qty = dto.quantity ?? item.quantity.toString()
     const price = dto.unitPrice ?? item.unitPrice.toString()
-    const totalPrice = parseFloat(qty) * parseFloat(price)
 
     const updated = await this.prisma.estimateItem.update({
       where: { id: itemId },
       data: {
         name: dto.name,
-        description: dto.description,
+        ...resolveLines(dto),
+        isPriced: dto.isPriced,
         quantity: dto.quantity,
         unit: dto.unit,
         unitPrice: dto.unitPrice,
-        totalPrice: totalPrice.toString(),
+        totalPrice: itemTotal(isPriced, qty, price),
         sortOrder: dto.sortOrder,
       },
       select: ITEM_SELECT,
@@ -539,10 +537,9 @@ export class EstimatesService {
       where: { estimateId },
       select: { totalPrice: true },
     })
-    const total = items.reduce((sum, i) => sum + parseFloat(i.totalPrice.toString()), 0)
     await this.prisma.estimate.update({
       where: { id: estimateId },
-      data: { totalAmount: total.toString() },
+      data: { totalAmount: sum(items.map((i) => i.totalPrice)) },
     })
   }
 }

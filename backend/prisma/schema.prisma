@@ -424,7 +424,12 @@ model EstimateItem {
   estimateId     Int
   subQuotationId Int?
   name           String
+  /// ข้อความล้วนของ lines (join ด้วย \n) — คงไว้ให้ส่วนที่อ่านแบบเดิม ห้ามแก้ตรง ให้แก้ lines
   description    String?
+  /// บรรทัดรายละเอียดพร้อมรูปแบบ [{ text, bold?, highlight? }] — ระยะเยื้องคือ space หน้า text
+  lines          Json?
+  /// false = หัวข้อหมวดที่ไม่มีราคา (มีเลขลำดับ ช่องราคาเว้นว่าง ไม่นับในยอดรวม)
+  isPriced       Boolean @default(true)
   quantity       Decimal @default(1) @db.Decimal(10, 3)
   unit           String?
   unitPrice      Decimal @default(0) @db.Decimal(15, 2)
@@ -1379,6 +1384,9 @@ model DocumentItem {
   documentId  Int
   name        String
   description String?
+  /// snapshot บรรทัดรายละเอียดพร้อมรูปแบบ — ดู EstimateItem.lines
+  lines       Json?
+  isPriced    Boolean @default(true)
   quantity    Decimal @default(1) @db.Decimal(10, 3)
   unit        String?
   unitPrice   Decimal @default(0) @db.Decimal(15, 2)

@@ -1,6 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger'
 import {
+  ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDecimal,
   IsInt,
   IsOptional,
@@ -12,16 +14,46 @@ import {
 } from 'class-validator'
 import { Type } from 'class-transformer'
 
+export class ItemLineDto {
+  @ApiProperty({ example: '  แบบแปลนลงสีสำหรับหมวดงานออกแบบ' })
+  @IsString()
+  @MaxLength(500)
+  text: string
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  bold?: boolean
+
+  @ApiPropertyOptional({ description: 'ไฮไลต์สีแดง' })
+  @IsOptional()
+  @IsBoolean()
+  highlight?: boolean
+}
+
 export class CreateEstimateItemDto {
   @ApiProperty({ example: 'งานรื้อถอน' })
   @IsString()
   @MaxLength(300)
   name: string
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'ข้อความล้วน — client เดิม ถ้าส่ง lines มาด้วยจะใช้ lines' })
   @IsOptional()
   @IsString()
   description?: string
+
+  @ApiPropertyOptional({ type: [ItemLineDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => ItemLineDto)
+  lines?: ItemLineDto[]
+
+  @ApiPropertyOptional({ description: 'false = หัวข้อหมวดที่ไม่มีราคา', default: true })
+  @IsOptional()
+  @IsBoolean()
+  isPriced?: boolean
 
   @ApiPropertyOptional({ example: '1.000' })
   @IsOptional()
@@ -49,6 +81,8 @@ export class CreateEstimateItemDto {
   @Min(1)
   subQuotationId?: number
 }
+
+export class UpdateEstimateItemDto extends PartialType(CreateEstimateItemDto) {}
 
 export class CreateEstimateDto {
   @ApiProperty({ example: 1 })

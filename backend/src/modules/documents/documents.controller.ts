@@ -22,6 +22,18 @@ export class DocumentsController {
     return this.documents.issueFromEstimate(estimateId, dto, user.id)
   }
 
+  @Get('preview-from-estimate/:estimateId')
+  @Permissions('estimate.view', 'document.view')
+  @ApiOperation({
+    summary: 'ตัวอย่างใบเสนอราคาจากร่าง (ไม่บันทึก) — คำนวณแบบเดียวกับตอนออกจริง',
+  })
+  previewFromEstimate(
+    @Param('estimateId', ParseIntPipe) estimateId: number,
+    @Query() query: IssueQuotationDto,
+  ) {
+    return this.documents.previewFromEstimate(estimateId, query)
+  }
+
   @Get()
   @Permissions('document.view')
   @ApiOperation({ summary: 'รายการเอกสาร' })

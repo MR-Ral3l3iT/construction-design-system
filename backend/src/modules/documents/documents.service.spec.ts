@@ -256,4 +256,54 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
     await expect(service.void(doc.id, 'ทดสอบ', ACTOR)).rejects.toThrow('รับชำระแล้ว')
   })
+
+  it('หมวดที่ไม่มีราคาไม่นับในยอด และ snapshot รูปแบบบรรทัดไปด้วย', async () => {
+    const est = await prisma.estimate.create({
+      data: {
+        projectId,
+        code: `EST-LINES-${Date.now()}`,
+        title: 'P2612 - pet hotel rama3',
+        items: {
+          create: [
+            {
+              name: 'หมวดงานออกแบบและจัดทำแบบ',
+              quantity: 1,
+              unitPrice: 173076.92,
+              totalPrice: 173076.92,
+              lines: [
+                { text: 'First concept design', bold: true },
+                { text: '  แบบแปลนลงสีสำหรับหมวดงานออกแบบ' },
+                { text: '  ออกแบบงาน soft scape', highlight: true },
+              ],
+            },
+            // ราคาค้างในฟอร์มแต่ตั้งเป็นไม่มีราคา → ต้องไม่ถูกนับ
+            { name: 'For Permission', isPriced: false, unitPrice: 9999, sortOrder: 1 },
+          ],
+        },
+      },
+    })
+
+    const preview = await service.previewFromEstimate(est.id, { vatPercent: 7 })
+    const doc = await issue(est.id, { vatPercent: 7 })
+
+    expect(doc.baseAmount.toFixed(2)).toBe('173076.92')
+    expect(doc.items[1]).toMatchObject({ isPriced: false })
+    expect(doc.items[1].amount.toFixed(2)).toBe('0.00')
+    expect(doc.items[0].lines).toEqual([
+      { text: 'First concept design', bold: true },
+      { text: '  แบบแปลนลงสีสำหรับหมวดงานออกแบบ' },
+      { text: '  ออกแบบงาน soft scape', highlight: true },
+    ])
+    // preview ต้องได้ยอดเท่าฉบับจริงทุกสตางค์
+    expect(preview.grandTotal.toFixed(2)).toBe(doc.grandTotal.toFixed(2))
+    expect(preview.status).toBe('PREVIEW')
+  })
+
+  it('preview แสดงได้แม้งวดยังไม่ครบ 100% โดยแนบคำเตือน แต่ออกจริงไม่ได้', async () => {
+    const est = await makeEstimate(['50', '40'])
+    const preview = await service.previewFromEstimate(est.id, {})
+    expect(preview.warnings[0]).toContain('100%')
+    expect(preview.installments).toHaveLength(2)
+    await expect(issue(est.id)).rejects.toThrow('100%')
+  })
 })

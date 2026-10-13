@@ -16,6 +16,7 @@ import { PaginationDto } from '../../common/dto/pagination.dto'
 import {
   CreateEstimateDto,
   CreateEstimateItemDto,
+  UpdateEstimateItemDto,
   UpsertInstallmentsDto,
   UpsertScheduleDto,
 } from './dto/create-estimate.dto'
@@ -105,7 +106,7 @@ export class EstimatesController {
   updateItem(
     @Param('id', ParseIntPipe) id: number,
     @Param('itemId', ParseIntPipe) itemId: number,
-    @Body() dto: Partial<CreateEstimateItemDto>,
+    @Body() dto: UpdateEstimateItemDto,
   ) {
     return this.estimatesService.updateItem(id, itemId, dto)
   }

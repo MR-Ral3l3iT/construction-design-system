@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { ActivityLogService } from '../../common/services/activity-log.service'
-import { calcLineAmount, calcTax, D, round4, sum } from '../../common/utils/money.util'
+import { calcLineAmount, calcTax, D, round2, round4, sum } from '../../common/utils/money.util'
 import { buildPaginationMeta, paginationSkipTake } from '../../common/utils/pagination.util'
 import { PrismaService } from '../../database/prisma.service'
 import { CompanyService } from '../company/company.service'
@@ -67,6 +67,8 @@ const DOCUMENT_DETAIL_SELECT = {
       id: true,
       name: true,
       description: true,
+      lines: true,
+      isPriced: true,
       quantity: true,
       unit: true,
       unitPrice: true,
@@ -112,6 +114,131 @@ function joinAddress(parts: Array<string | null | undefined>) {
   return parts.filter((p) => p && p.trim()).join(' ')
 }
 
+function documentDates(dto: Pick<IssueQuotationDto, 'documentDate' | 'validDays'>) {
+  const documentDate = dto.documentDate ? new Date(dto.documentDate) : new Date()
+  const dueDate = dto.validDays
+    ? new Date(documentDate.getTime() + dto.validDays * 24 * 60 * 60 * 1000)
+    : null
+  return { documentDate, dueDate }
+}
+
+/** ข้อมูลของ Estimate ที่ต้องใช้สร้างใบเสนอราคา — ใช้ทั้งตอนออกจริงและตอน preview */
+const ESTIMATE_FOR_QUOTATION = {
+  id: true,
+  code: true,
+  title: true,
+  status: true,
+  project: {
+    select: {
+      id: true,
+      name: true,
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          companyName: true,
+          taxId: true,
+          email: true,
+          phone: true,
+          address: true,
+          subdistrict: true,
+          district: true,
+          province: true,
+          postcode: true,
+        },
+      },
+    },
+  },
+  items: { orderBy: { sortOrder: 'asc' } },
+  installments: { orderBy: { installmentNo: 'asc' } },
+  schedulePhases: { orderBy: [{ sortOrder: 'asc' }, { startWeek: 'asc' }] },
+} satisfies Prisma.EstimateSelect
+
+type EstimateForQuotation = Prisma.EstimateGetPayload<{ select: typeof ESTIMATE_FOR_QUOTATION }>
+
+interface TaxSettings {
+  vatRate: Prisma.Decimal
+  whtRate: { id: number; rate: Prisma.Decimal } | null
+}
+
+/**
+ * คำนวณเนื้อหาใบเสนอราคาจาก Estimate — ฟังก์ชันเดียวที่ทั้ง "ออกจริง" และ "preview" ใช้
+ * เพื่อให้สิ่งที่เห็นใน preview ตรงกับฉบับที่ออกทุกสตางค์
+ *
+ * strict = true (ออกจริง): งวดรวมไม่ครบ 100% → error
+ * strict = false (preview): แบ่งตาม % ตรง ๆ แล้วแนบคำเตือนแทน ให้เห็นหน้าตาก่อนกรอกครบ
+ */
+function buildQuotation(estimate: EstimateForQuotation, tax: TaxSettings, strict: boolean) {
+  const items = estimate.items.map((it, idx) => ({
+    name: it.name,
+    description: it.description,
+    lines: it.lines ?? Prisma.JsonNull,
+    isPriced: it.isPriced,
+    quantity: it.quantity,
+    unit: it.unit,
+    unitPrice: it.unitPrice,
+    // หัวข้อที่ไม่มีราคาเป็น 0 เสมอ แม้มีราคาค้างอยู่ในฟอร์ม
+    amount: it.isPriced ? calcLineAmount(it.quantity, it.unitPrice) : calcLineAmount(0, 0),
+    sortOrder: idx,
+  }))
+  const totals = calcTax({
+    subtotal: sum(items.map((l) => l.amount)),
+    vatRate: tax.vatRate,
+    whtRate: tax.whtRate?.rate ?? 0,
+  })
+
+  const warnings: string[] = []
+  const pcts = estimate.installments.map((i) => i.percentage)
+  let amounts: Prisma.Decimal[]
+  try {
+    amounts = allocateInstallments(totals.baseAmount, pcts)
+  } catch (e) {
+    if (strict) throw new BadRequestException((e as Error).message)
+    warnings.push((e as Error).message)
+    amounts = pcts.map((p) => round2(totals.baseAmount.times(D(p)).dividedBy(100)))
+  }
+  if (items.length === 0) {
+    if (strict) throw new BadRequestException('ใบประเมินยังไม่มีรายการ')
+    warnings.push('ใบประเมินยังไม่มีรายการ')
+  }
+
+  const customer = estimate.project.customer
+  const party = {
+    customerId: customer?.id,
+    partyName: customer?.companyName || customer?.name,
+    partyTaxId: customer?.taxId,
+    partyAddress: joinAddress([
+      customer?.address,
+      customer?.subdistrict && `ต.${customer.subdistrict}`,
+      customer?.district && `อ.${customer.district}`,
+      customer?.province,
+      customer?.postcode,
+    ]),
+    partyContact: customer?.companyName ? customer.name : null,
+    partyPhone: customer?.phone,
+    partyEmail: customer?.email,
+    projectName: estimate.project.name,
+  }
+
+  const installments = estimate.installments.map((inst, idx) => ({
+    installmentNo: idx + 1,
+    description: inst.description,
+    triggerText: inst.triggerText,
+    withinWeeks: inst.withinWeeks,
+    percentage: inst.percentage,
+    amount: amounts[idx],
+  }))
+  const schedule = estimate.schedulePhases.map((ph, idx) => ({
+    name: ph.name,
+    description: ph.description,
+    startWeek: ph.startWeek,
+    durationWeeks: ph.durationWeeks,
+    sortOrder: idx,
+  }))
+
+  return { items, totals, installments, schedule, party, warnings }
+}
+
 @Injectable()
 export class DocumentsService {
   constructor(
@@ -133,26 +260,8 @@ export class DocumentsService {
    */
   async issueFromEstimate(estimateId: number, dto: IssueQuotationDto, actorId: number) {
     const seller = await this.company.getProfile()
-
-    const whtRate = dto.whtRateId
-      ? await this.prisma.whtRate.findFirst({
-          where: { id: dto.whtRateId, isActive: true },
-          select: { id: true, rate: true },
-        })
-      : null
-    if (dto.whtRateId && !whtRate) throw new BadRequestException('ไม่พบอัตราหัก ณ ที่จ่ายที่เลือก')
-
-    const vatRate =
-      dto.vatPercent !== undefined
-        ? round4(D(dto.vatPercent).dividedBy(100))
-        : seller.isVatRegistered
-          ? D(seller.defaultVatRate)
-          : D(0)
-
-    const documentDate = dto.documentDate ? new Date(dto.documentDate) : new Date()
-    const dueDate = dto.validDays
-      ? new Date(documentDate.getTime() + dto.validDays * 24 * 60 * 60 * 1000)
-      : null
+    const taxSettings = await this.resolveTaxSettings(dto, seller)
+    const { documentDate, dueDate } = documentDates(dto)
 
     const doc = await this.prisma.$transaction(async (tx) => {
       // ล็อกแถว Estimate กันกดออกพร้อมกันสองครั้งแล้วได้ QT สองใบ
@@ -160,36 +269,7 @@ export class DocumentsService {
 
       const estimate = await tx.estimate.findUnique({
         where: { id: estimateId },
-        select: {
-          id: true,
-          code: true,
-          title: true,
-          status: true,
-          project: {
-            select: {
-              id: true,
-              name: true,
-              customer: {
-                select: {
-                  id: true,
-                  name: true,
-                  companyName: true,
-                  taxId: true,
-                  email: true,
-                  phone: true,
-                  address: true,
-                  subdistrict: true,
-                  district: true,
-                  province: true,
-                  postcode: true,
-                },
-              },
-            },
-          },
-          items: { orderBy: { sortOrder: 'asc' } },
-          installments: { orderBy: { installmentNo: 'asc' } },
-          schedulePhases: { orderBy: [{ sortOrder: 'asc' }, { startWeek: 'asc' }] },
-        },
+        select: ESTIMATE_FOR_QUOTATION,
       })
       if (!estimate) throw new NotFoundException('ไม่พบใบประเมิน')
       if (estimate.status !== 'DRAFT') {
@@ -197,30 +277,9 @@ export class DocumentsService {
           'ออกใบเสนอราคาได้เฉพาะใบประเมินสถานะร่าง — ถ้าต้องการแก้ไขฉบับที่ส่งไปแล้ว ให้กด "แก้ไขเพื่อออกฉบับใหม่" ก่อน',
         )
       }
-      if (estimate.items.length === 0) {
-        throw new BadRequestException('ใบประเมินยังไม่มีรายการ')
-      }
 
-      // ── ยอดเงิน ──
-      const lines = estimate.items.map((it) => ({
-        ...it,
-        amount: calcLineAmount(it.quantity, it.unitPrice),
-      }))
-      const tax = calcTax({
-        subtotal: sum(lines.map((l) => l.amount)),
-        vatRate,
-        whtRate: whtRate?.rate ?? 0,
-      })
-
-      let installmentAmounts: Prisma.Decimal[]
-      try {
-        installmentAmounts = allocateInstallments(
-          tax.baseAmount,
-          estimate.installments.map((i) => i.percentage),
-        )
-      } catch (e) {
-        throw new BadRequestException((e as Error).message)
-      }
+      const built = buildQuotation(estimate, taxSettings, true)
+      const tax = built.totals
 
       // ── เลขที่: ฉบับแรกจ่ายเลขใหม่, ฉบับแก้ไขใช้เลขฐาน + -R{n} ──
       const previous = await tx.document.findFirst({
@@ -253,7 +312,6 @@ export class DocumentsService {
         code = await this.sequence.next(tx, 'QUOTATION', documentDate)
       }
 
-      const customer = estimate.project.customer
       const now = new Date()
 
       const created = await tx.document.create({
@@ -262,7 +320,6 @@ export class DocumentsService {
           docType: 'QUOTATION',
           status: 'CONFIRMED',
           companyId: seller.id,
-          customerId: customer?.id,
           projectId: estimate.project.id,
           estimateId: estimate.id,
           rootDocId,
@@ -277,26 +334,14 @@ export class DocumentsService {
           sellerAddress: seller.address,
           sellerContact: seller.contactLine,
 
-          partyName: customer?.companyName || customer?.name,
-          partyTaxId: customer?.taxId,
-          partyAddress: joinAddress([
-            customer?.address,
-            customer?.subdistrict && `ต.${customer.subdistrict}`,
-            customer?.district && `อ.${customer.district}`,
-            customer?.province,
-            customer?.postcode,
-          ]),
-          partyContact: customer?.companyName ? customer.name : null,
-          partyPhone: customer?.phone,
-          partyEmail: customer?.email,
-          projectName: estimate.project.name,
+          ...built.party,
 
           subtotal: tax.subtotal,
           discountAmount: tax.discountAmount,
           baseAmount: tax.baseAmount,
           vatRate: tax.vatRate,
           vatAmount: tax.vatAmount,
-          whtRateId: whtRate?.id,
+          whtRateId: taxSettings.whtRate?.id,
           whtRate: tax.whtRate,
           whtAmount: tax.whtAmount,
           grandTotal: tax.grandTotal,
@@ -307,36 +352,9 @@ export class DocumentsService {
           confirmedAt: now,
           confirmedById: actorId,
 
-          items: {
-            create: lines.map((l, idx) => ({
-              name: l.name,
-              description: l.description,
-              quantity: l.quantity,
-              unit: l.unit,
-              unitPrice: l.unitPrice,
-              amount: l.amount,
-              sortOrder: idx,
-            })),
-          },
-          installments: {
-            create: estimate.installments.map((inst, idx) => ({
-              installmentNo: idx + 1,
-              description: inst.description,
-              triggerText: inst.triggerText,
-              withinWeeks: inst.withinWeeks,
-              percentage: inst.percentage,
-              amount: installmentAmounts[idx],
-            })),
-          },
-          schedule: {
-            create: estimate.schedulePhases.map((ph, idx) => ({
-              name: ph.name,
-              description: ph.description,
-              startWeek: ph.startWeek,
-              durationWeeks: ph.durationWeeks,
-              sortOrder: idx,
-            })),
-          },
+          items: { create: built.items },
+          installments: { create: built.installments },
+          schedule: { create: built.schedule },
         },
         select: { id: true, code: true, revisionNo: true },
       })
@@ -355,6 +373,120 @@ export class DocumentsService {
     })
 
     return this.findOne(doc.id)
+  }
+
+  /** VAT / หัก ณ ที่จ่ายที่ผู้ออกเลือก — ไม่ระบุ VAT ใช้ค่าตั้งต้นของบริษัท */
+  private async resolveTaxSettings(
+    dto: Pick<IssueQuotationDto, 'vatPercent' | 'whtRateId'>,
+    seller: { isVatRegistered: boolean; defaultVatRate: Prisma.Decimal },
+  ): Promise<TaxSettings> {
+    const whtRate = dto.whtRateId
+      ? await this.prisma.whtRate.findFirst({
+          where: { id: dto.whtRateId, isActive: true },
+          select: { id: true, rate: true },
+        })
+      : null
+    if (dto.whtRateId && !whtRate) throw new BadRequestException('ไม่พบอัตราหัก ณ ที่จ่ายที่เลือก')
+
+    const vatRate =
+      dto.vatPercent !== undefined
+        ? round4(D(dto.vatPercent).dividedBy(100))
+        : seller.isVatRegistered
+          ? D(seller.defaultVatRate)
+          : D(0)
+    return { vatRate, whtRate }
+  }
+
+  /**
+   * ตัวอย่างใบเสนอราคาจากร่าง — คำนวณด้วย buildQuotation ตัวเดียวกับตอนออกจริงแต่ไม่บันทึก
+   * ไม่ระบุภาษี: ใช้ค่าของฉบับที่มีผลอยู่ (ถ้ามี) ไม่งั้นใช้ค่าตั้งต้นของบริษัทและไม่หัก ณ ที่จ่าย
+   */
+  async previewFromEstimate(estimateId: number, dto: IssueQuotationDto) {
+    const [seller, estimate, active] = await Promise.all([
+      this.company.getProfile(),
+      this.prisma.estimate.findUnique({
+        where: { id: estimateId },
+        select: ESTIMATE_FOR_QUOTATION,
+      }),
+      this.prisma.document.findFirst({
+        where: ACTIVE_QUOTATION(estimateId),
+        orderBy: { revisionNo: 'desc' },
+        select: { code: true, vatRate: true, whtRateId: true },
+      }),
+    ])
+    if (!estimate) throw new NotFoundException('ไม่พบใบประเมิน')
+
+    const noTaxChoice = dto.vatPercent === undefined && dto.whtRateId === undefined
+    const taxSettings = await this.resolveTaxSettings(
+      noTaxChoice && active
+        ? { vatPercent: Number(active.vatRate) * 100, whtRateId: active.whtRateId }
+        : dto,
+      seller,
+    )
+    const { documentDate, dueDate } = documentDates(dto)
+    const built = buildQuotation(estimate, taxSettings, false)
+
+    return this.decoratePrint(
+      {
+        id: 0,
+        code: null,
+        docType: 'QUOTATION' as const,
+        status: 'PREVIEW' as const,
+        revisionNo: 0,
+        documentDate,
+        dueDate,
+        estimateId,
+        projectId: estimate.project.id,
+        sellerName: seller.name,
+        sellerBranchCode: seller.branchCode,
+        sellerTaxId: seller.taxId,
+        sellerAddress: seller.address,
+        sellerContact: seller.contactLine,
+        ...built.party,
+        ...built.totals,
+        whtRateId: taxSettings.whtRate?.id ?? null,
+        note: dto.note ?? null,
+        voidReason: null,
+        supersededBy: null,
+        items: built.items.map((it, idx) => ({ ...it, id: idx + 1, isNote: false })),
+        installments: built.installments.map((inst, idx) => ({ ...inst, id: idx + 1 })),
+        schedule: built.schedule.map((ph, idx) => ({ ...ph, id: idx + 1 })),
+        warnings: built.warnings,
+        // ออกตอนนี้จะได้เลขอะไร — แสดงให้รู้ว่าเป็นฉบับแก้ไขหรือฉบับแรก
+        willRevise: active?.code ?? null,
+      },
+      seller,
+    )
+  }
+
+  /** เติมข้อมูลที่หน้าพิมพ์ต้องใช้: ภาษีต่องวด ข้อความเวลางวด โลโก้ */
+  private decoratePrint<
+    T extends {
+      vatRate: Prisma.Decimal
+      whtRate: Prisma.Decimal
+      installments: Array<{
+        amount: Prisma.Decimal
+        triggerText: string | null
+        withinWeeks: number | null
+      }>
+    },
+  >(doc: T, seller: { logoUrl: string | null; signatureName: string | null }) {
+    return {
+      ...doc,
+      installments: doc.installments.map((inst) => {
+        const t = calcTax({ subtotal: inst.amount, vatRate: doc.vatRate, whtRate: doc.whtRate })
+        return {
+          ...inst,
+          timingText: installmentTimingText(inst.triggerText, inst.withinWeeks),
+          vatAmount: t.vatAmount,
+          whtAmount: t.whtAmount,
+          netAmount: t.netAmount,
+        }
+      }),
+      // โลโก้และลายเซ็นใช้ของปัจจุบัน ไม่ใช่ข้อมูลทางบัญชีจึงไม่ต้อง snapshot
+      sellerLogoUrl: seller.logoUrl,
+      sellerSignatureName: seller.signatureName,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -409,25 +541,7 @@ export class DocumentsService {
    */
   async printData(id: number) {
     const [doc, seller] = await Promise.all([this.findOne(id), this.company.getProfile()])
-
-    const installments = doc.installments.map((inst) => {
-      const tax = calcTax({ subtotal: inst.amount, vatRate: doc.vatRate, whtRate: doc.whtRate })
-      return {
-        ...inst,
-        timingText: installmentTimingText(inst.triggerText, inst.withinWeeks),
-        vatAmount: tax.vatAmount,
-        whtAmount: tax.whtAmount,
-        netAmount: tax.netAmount,
-      }
-    })
-
-    return {
-      ...doc,
-      installments,
-      // โลโก้และลายเซ็นใช้ของปัจจุบัน ไม่ใช่ข้อมูลทางบัญชีจึงไม่ต้อง snapshot
-      sellerLogoUrl: seller.logoUrl,
-      sellerSignatureName: seller.signatureName,
-    }
+    return this.decoratePrint({ ...doc, warnings: [] as string[], willRevise: null }, seller)
   }
 
   // ---------------------------------------------------------------------------

@@ -377,11 +377,11 @@ export class DocumentsService {
 
   /**
    * VAT / หัก ณ ที่จ่ายของใบเสนอราคา
-   * - VAT: ที่ผู้ออกเลือก ไม่ระบุ = ค่าตั้งต้นของบริษัท
+   * - VAT: อัตราของบริษัทเสมอ (7%)
    * - หัก ณ ที่จ่าย: whtRateId ที่ส่งมา (API เดิม) มาก่อน ไม่งั้นใช้ % ที่ตั้งไว้ในใบประเมิน
    */
   private async resolveTaxSettings(
-    dto: Pick<IssueQuotationDto, 'vatPercent' | 'whtRateId'>,
+    dto: Pick<IssueQuotationDto, 'whtRateId'>,
     seller: { isVatRegistered: boolean; defaultVatRate: Prisma.Decimal },
     estimateWhtPercent: Prisma.Decimal | null,
   ): Promise<TaxSettings> {
@@ -402,12 +402,8 @@ export class DocumentsService {
       whtRate = { id: match?.id ?? null, rate }
     }
 
-    const vatRate =
-      dto.vatPercent !== undefined
-        ? round4(D(dto.vatPercent).dividedBy(100))
-        : seller.isVatRegistered
-          ? D(seller.defaultVatRate)
-          : D(0)
+    // ออกในนามบริษัทจดทะเบียน VAT — ทุกใบคิดอัตราของบริษัท (7%) ไม่ให้เลือกเอง
+    const vatRate = seller.isVatRegistered ? D(seller.defaultVatRate) : D(0)
     return { vatRate, whtRate }
   }
 
@@ -425,20 +421,12 @@ export class DocumentsService {
       this.prisma.document.findFirst({
         where: ACTIVE_QUOTATION(estimateId),
         orderBy: { revisionNo: 'desc' },
-        select: { code: true, vatRate: true },
+        select: { code: true },
       }),
     ])
     if (!estimate) throw new NotFoundException('ไม่พบใบประเมิน')
 
-    // ไม่ระบุ VAT → ใช้ของฉบับที่มีผลอยู่ (ถ้ามี) · หัก ณ ที่จ่ายมาจากใบประเมินเสมอ
-    const taxSettings = await this.resolveTaxSettings(
-      {
-        ...dto,
-        vatPercent: dto.vatPercent ?? (active ? Number(active.vatRate) * 100 : undefined),
-      },
-      seller,
-      estimate.whtPercent,
-    )
+    const taxSettings = await this.resolveTaxSettings(dto, seller, estimate.whtPercent)
     const { documentDate, dueDate } = documentDates(dto)
     const built = buildQuotation(estimate, taxSettings, false)
 

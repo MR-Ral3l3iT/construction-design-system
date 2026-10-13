@@ -97,3 +97,58 @@ export function calcTax(input: TaxCalcInput): TaxCalcResult {
 export function calcLineAmount(quantity: DecimalLike, unitPrice: DecimalLike): Prisma.Decimal {
   return round2(D(quantity).times(D(unitPrice)))
 }
+
+export interface ReverseInput {
+  /** ยอดที่ลูกค้าต้องการจ่าย */
+  target: DecimalLike
+  vatRate: DecimalLike
+  whtRate?: DecimalLike
+  /** true = target คือยอดรับสุทธิหลังหัก ณ ที่จ่าย · false = target คือยอดรวม VAT */
+  afterWht: boolean
+}
+
+export interface ReverseResult {
+  /** ราคาก่อน VAT ที่หาได้ */
+  base: Prisma.Decimal
+  totals: TaxCalcResult
+  /** ยอดที่ได้จริงเมื่อใช้ base นี้ — เทียบกับ target */
+  achieved: Prisma.Decimal
+  /** achieved − target (0 = ตรงทุกสตางค์) */
+  diff: Prisma.Decimal
+}
+
+/**
+ * คิดย้อนจากยอดที่ลูกค้าจะจ่าย → ราคาก่อน VAT
+ *
+ * หารตรง ๆ (target ÷ (1 + VAT − WHT)) ได้ค่าประมาณ แต่ VAT และ WHT ถูกปัดทีละตัว
+ * ยอดที่คำนวณกลับจึงอาจคลาดไป 1 สตางค์ — ไล่หาราคารอบค่าประมาณทีละสตางค์ ให้ได้ตัวที่
+ * calcTax แล้วตรง target พอดี ถ้าไม่มีตัวไหนตรง (เกิดได้เพราะการปัด) เลือกตัวที่ใกล้ที่สุด
+ * โดยให้ลูกค้าจ่ายไม่เกินยอดที่ขอ
+ */
+export function reverseFromTarget(input: ReverseInput): ReverseResult {
+  const target = round2(input.target)
+  const vatRate = D(input.vatRate)
+  const whtRate = input.afterWht ? D(input.whtRate) : D(0)
+  const factor = D(1).plus(vatRate).minus(whtRate)
+  if (factor.lessThanOrEqualTo(0)) throw new Error('อัตราภาษีไม่ถูกต้อง')
+
+  const estimate = round2(target.dividedBy(factor))
+  const evaluate = (base: Prisma.Decimal) => {
+    const totals = calcTax({ subtotal: base, vatRate, whtRate })
+    const achieved = input.afterWht ? totals.netAmount : totals.grandTotal
+    return { base: totals.baseAmount, totals, achieved, diff: achieved.minus(target) }
+  }
+
+  let best = evaluate(estimate)
+  for (let satang = -5; satang <= 5; satang++) {
+    const candidate = evaluate(estimate.plus(D(satang).dividedBy(100)))
+    if (candidate.base.lessThan(0)) continue
+    const better =
+      candidate.diff.abs().lessThan(best.diff.abs()) ||
+      // ระยะเท่ากัน → เลือกตัวที่ลูกค้าจ่ายไม่เกินยอดที่ขอ
+      (candidate.diff.abs().equals(best.diff.abs()) && candidate.diff.lessThan(best.diff))
+    if (better) best = candidate
+    if (best.diff.isZero()) break
+  }
+  return best
+}

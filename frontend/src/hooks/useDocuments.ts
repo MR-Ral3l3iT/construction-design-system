@@ -93,7 +93,6 @@ export interface DocumentPrintData extends AccountingDocument {
 
 export interface IssueQuotationPayload {
   documentDate?: string
-  vatPercent?: number
   whtRateId?: number | null
   validDays?: number
   note?: string

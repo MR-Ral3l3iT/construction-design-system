@@ -7,13 +7,11 @@ import { QuotationTemplate } from '@/components/print/QuotationTemplate'
 
 /**
  * ตัวอย่างใบเสนอราคาจากร่าง — template เดียวกับฉบับจริง ยอดคำนวณที่ backend แบบเดียวกัน
- * แต่ไม่บันทึกและไม่ออกเลข · ตั้งค่าภาษีผ่าน query เช่น ?vatPercent=7&whtRateId=2&validDays=30
+ * แต่ไม่บันทึกและไม่ออกเลข · วันที่ ยืนราคา หมายเหตุ ผ่าน query เช่น ?validDays=30&note=...
  */
 function readParams(sp: URLSearchParams): IssueQuotationPayload {
   const num = (k: string) => (sp.get(k) ? Number(sp.get(k)) : undefined)
   return {
-    vatPercent: num('vatPercent'),
-    whtRateId: num('whtRateId'),
     validDays: num('validDays'),
     documentDate: sp.get('documentDate') || undefined,
     note: sp.get('note') || undefined,

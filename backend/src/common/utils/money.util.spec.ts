@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client'
-import { calcLineAmount, calcTax, D, round2, round4, sum } from './money.util'
+import { calcLineAmount, calcTax, D, reverseFromTarget, round2, round4, sum } from './money.util'
 
 describe('money.util', () => {
   describe('D', () => {
@@ -105,5 +105,43 @@ describe('money.util', () => {
       expect(r.grandTotal.toString()).toBe('0')
       expect(r.netAmount.toString()).toBe('0')
     })
+  })
+})
+
+describe('reverseFromTarget', () => {
+  it('ยอดรับสุทธิหลังหัก ณ ที่จ่ายที่ตรงพอดีได้ — VAT 7% WHT 3%', () => {
+    const r = reverseFromTarget({ target: 156000, vatRate: 0.07, whtRate: 0.03, afterWht: true })
+    expect(r.diff.isZero()).toBe(true)
+    expect(r.base.toFixed(2)).toBe('150000.00')
+  })
+
+  it('180,000 สุทธิตรงพอดีไม่ได้เพราะการปัด → 179,999.99 (ไม่เกินยอดที่ขอ)', () => {
+    // 173,076.92 → สุทธิ 179,999.99 · 173,076.93 → 180,000.01 ไม่มีราคาไหนให้ 180,000.00
+    const r = reverseFromTarget({ target: 180000, vatRate: 0.07, whtRate: 0.03, afterWht: true })
+    expect(r.base.toFixed(2)).toBe('173076.92')
+    expect(r.achieved.toFixed(2)).toBe('179999.99')
+    expect(r.diff.toFixed(2)).toBe('-0.01')
+  })
+
+  it('ยอดรวม VAT อย่างเดียว ไม่สน WHT', () => {
+    const r = reverseFromTarget({ target: 180000, vatRate: 0.07, whtRate: 0.03, afterWht: false })
+    expect(r.diff.isZero()).toBe(true)
+    expect(r.totals.grandTotal.toFixed(2)).toBe('180000.00')
+    expect(r.base.toFixed(2)).toBe('168224.30')
+  })
+
+  it('ยอดที่ไม่มีราคาไหนให้ตรงพอดี → ใกล้ที่สุดและไม่เกินยอดที่ขอ', () => {
+    // ไล่ทุกสตางค์ช่วงหนึ่ง: ทุกผลต้องห่างไม่เกิน 1 สตางค์ และถ้าไม่ตรงต้องต่ำกว่า target
+    for (let t = 100000; t < 100050; t++) {
+      const target = t / 100 + 1000
+      const r = reverseFromTarget({ target, vatRate: 0.07, whtRate: 0.03, afterWht: true })
+      expect(r.diff.abs().lessThanOrEqualTo(0.01)).toBe(true)
+      if (!r.diff.isZero()) expect(r.diff.isNegative()).toBe(true)
+    }
+  })
+
+  it('ไม่หัก ณ ที่จ่าย + afterWht = เหมือนยอดรวม VAT', () => {
+    const r = reverseFromTarget({ target: 107000, vatRate: 0.07, afterWht: true })
+    expect(r.base.toFixed(2)).toBe('100000.00')
   })
 })

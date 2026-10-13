@@ -341,3 +341,45 @@ export function useUpsertInstallments(estimateId: number) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['estimates', estimateId] }),
   })
 }
+
+export interface ReversePricePayload {
+  targetAmount: number
+  /** true = ยอดรับสุทธิหลังหัก ณ ที่จ่าย · false = ยอดรวม VAT */
+  afterWht: boolean
+  itemId?: number
+  /** true = บันทึกราคาใหม่ · false = ดูผลก่อน */
+  apply?: boolean
+}
+
+export interface ReversePriceResult {
+  targetAmount: string
+  afterWht: boolean
+  item: { id: number; name: string; quantity: string; unitPrice: string; lineAmount: string }
+  summary: {
+    baseAmount: string
+    vatRate: string
+    vatAmount: string
+    grandTotal: string
+    whtRate: string
+    whtAmount: string
+    netAmount: string
+  }
+  achieved: string
+  /** ยอดที่ได้ − ยอดที่ขอ ("0" = ตรงทุกสตางค์) */
+  diff: string
+  applied: boolean
+}
+
+/** คิดย้อนราคาจากยอดที่ลูกค้าจะจ่าย — คำนวณที่ backend ด้วย Decimal */
+export function useReversePrice(estimateId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: ReversePricePayload) => {
+      const { data } = await api.post(`/estimates/${estimateId}/reverse-price`, payload)
+      return (data?.data ?? data) as ReversePriceResult
+    },
+    onSuccess: (result) => {
+      if (result.applied) qc.invalidateQueries({ queryKey: ['estimates', estimateId] })
+    },
+  })
+}

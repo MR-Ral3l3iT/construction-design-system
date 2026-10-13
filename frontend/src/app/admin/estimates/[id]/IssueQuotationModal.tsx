@@ -38,7 +38,6 @@ export function IssueQuotationModal({
   const issue = useIssueQuotation(estimateId)
 
   const [documentDate, setDocumentDate] = useState(todayISO())
-  const [vatPercent, setVatPercent] = useState('7')
   const [validDays, setValidDays] = useState('30')
   const [note, setNote] = useState('')
 
@@ -46,30 +45,26 @@ export function IssueQuotationModal({
     if (!open) return
     setDocumentDate(todayISO())
     setNote('')
-    // ×100 ด้วย float ได้ 7.000000000000001 — ปัดเป็น 2 ตำแหน่งก่อนแสดง
-    const toPercent = (rate: string | number) => String(Number((Number(rate) * 100).toFixed(2)))
-    if (previous) {
-      setVatPercent(toPercent(previous.vatRate))
-    } else if (company) {
-      setVatPercent(company.isVatRegistered ? toPercent(company.defaultVatRate) : '0')
-    }
-    // พึ่งค่าเท่านั้น ไม่ใช่ object — refetch ระหว่างเปิดหน้าต่างต้องไม่ล้างค่าที่ผู้ใช้กรอก
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, company?.defaultVatRate, company?.isVatRegistered, previous?.vatRate])
+  }, [open])
 
   /** ตัวอย่างด้วยค่าที่เลือกในหน้าต่างนี้ — ภาษี วันที่ หมายเหตุ ตรงกับที่จะออกจริง */
   function openPreview() {
-    const q = new URLSearchParams({ vatPercent, documentDate })
+    const q = new URLSearchParams({ documentDate })
     if (validDays) q.set('validDays', validDays)
     if (note.trim()) q.set('note', note.trim())
     window.open(`/print/quotation-preview/${estimateId}?${q}`, '_blank')
   }
 
+  const vatLabel = company
+    ? company.isVatRegistered
+      ? `${Number((Number(company.defaultVatRate) * 100).toFixed(2))}%`
+      : 'ไม่คิด VAT'
+    : '-'
+
   async function handleSubmit() {
     try {
       const doc = await issue.mutateAsync({
         documentDate,
-        vatPercent: Number(vatPercent),
         validDays: validDays ? Number(validDays) : undefined,
         note: note.trim() || undefined,
       })
@@ -131,15 +126,13 @@ export function IssueQuotationModal({
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="ภาษีมูลค่าเพิ่ม (%)"
-            type="number"
-            min="0"
-            max="100"
-            step="0.01"
-            value={vatPercent}
-            onChange={(e) => setVatPercent(e.target.value)}
-          />
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-gray-700">ภาษีมูลค่าเพิ่ม</p>
+            <p className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+              {vatLabel}
+              <span className="ml-1 text-xs text-gray-400">(ออกในนามบริษัท)</span>
+            </p>
+          </div>
           <div>
             <p className="mb-1.5 text-sm font-medium text-gray-700">หัก ณ ที่จ่าย</p>
             <p className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700">

@@ -21,17 +21,6 @@ export class IssueQuotationDto {
   @IsDateString()
   documentDate?: string
 
-  @ApiPropertyOptional({
-    description: 'อัตรา VAT เป็น % (ไม่ส่ง = ค่าตั้งต้นของบริษัท, 0 = ไม่คิด VAT)',
-    example: 7,
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(100)
-  vatPercent?: number
-
   @ApiPropertyOptional({ description: 'อัตราหัก ณ ที่จ่าย (ไม่ส่ง/null = ไม่หัก)' })
   @IsOptional()
   @Type(() => Number)

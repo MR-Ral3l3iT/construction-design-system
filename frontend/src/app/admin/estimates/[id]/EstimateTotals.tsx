@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Calculator } from 'lucide-react'
+import { ReversePriceModal } from './ReversePriceModal'
 import { useUpdateEstimate, type Estimate } from '@/hooks/useEstimates'
 import { useToast } from '@/providers/toast-provider'
 
@@ -20,6 +22,7 @@ export function EstimateTotals({ estimate, editable }: { estimate: Estimate; edi
   const update = useUpdateEstimate(estimate.id, estimate.project?.id)
   const saved = estimate.whtPercent != null ? String(Number(estimate.whtPercent)) : null
   const [percent, setPercent] = useState(saved ?? DEFAULT_WHT_PERCENT)
+  const [reverseOpen, setReverseOpen] = useState(false)
 
   useEffect(() => {
     if (saved) setPercent(saved)
@@ -96,6 +99,23 @@ export function EstimateTotals({ estimate, editable }: { estimate: Estimate; edi
         <span className="text-gray-500">ยอดชำระสุทธิ</span>
         <span className="text-xl font-bold tabular-nums text-primary-600">{fmt(s.netAmount)}</span>
       </div>
+      {editable && (
+        <div className="pt-1 text-right">
+          <button
+            type="button"
+            onClick={() => setReverseOpen(true)}
+            className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline"
+          >
+            <Calculator className="h-3.5 w-3.5" />
+            คิดย้อนจากยอดที่ลูกค้าจะจ่าย
+          </button>
+        </div>
+      )}
+      <ReversePriceModal
+        open={reverseOpen}
+        onClose={() => setReverseOpen(false)}
+        estimate={estimate}
+      />
       {!editable && saved !== null && (
         <p className="text-right text-xs text-gray-400">แก้ได้เมื่อใบประเมินเป็นร่าง</p>
       )}

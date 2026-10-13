@@ -10,9 +10,20 @@ import {
   EstimateSchedulePhaseDto,
   UpdateEstimateItemDto,
 } from './dto/create-estimate.dto'
-import { UpdateEstimateDto, UpdateEstimateStatusDto } from './dto/update-estimate.dto'
+import {
+  ReversePriceDto,
+  UpdateEstimateDto,
+  UpdateEstimateStatusDto,
+} from './dto/update-estimate.dto'
 import { PaginationDto } from '../../common/dto/pagination.dto'
-import { calcLineAmount, calcTax, D, sum } from '../../common/utils/money.util'
+import {
+  calcLineAmount,
+  calcTax,
+  D,
+  reverseFromTarget,
+  round2,
+  sum,
+} from '../../common/utils/money.util'
 import { resolveLines } from './item-lines'
 import { CompanyService } from '../company/company.service'
 
@@ -322,6 +333,71 @@ export class EstimatesService {
    * ด้วยวิธีเดียวกับใบเสนอราคา หน้าจอไม่ต้องคิดเงินเอง
    * VAT ใช้ของฉบับที่ออกล่าสุด ถ้ายังไม่เคยออกใช้ค่าตั้งต้นของบริษัท
    */
+  /**
+   * คิดย้อนจากยอดที่ลูกค้าจะจ่าย → ราคาของรายการที่เลือก (รายการอื่นคงราคาเดิม)
+   * apply = false คืนผลให้ดูก่อน · apply = true บันทึกราคาใหม่ (เฉพาะใบร่าง)
+   *
+   * ถ้าจำนวนของรายการไม่ใช่ 1 ราคาต่อหน่วยถูกปัด 2 ตำแหน่ง ยอดจริงจึงอาจคลาดจากที่หาได้
+   * — คืนยอดที่ได้จริงหลังปัดเสมอ ไม่ใช่ค่าทางทฤษฎี
+   */
+  async reversePrice(estimateId: number, dto: ReversePriceDto, actorId: number) {
+    const [estimate, seller] = await Promise.all([
+      this.findOne(estimateId),
+      this.company.getProfile(),
+    ])
+    if (dto.apply && estimate.status !== 'DRAFT') {
+      throw new BadRequestException('ปรับราคาได้เฉพาะใบประเมินสถานะร่าง')
+    }
+
+    const priced = estimate.items.filter((it) => it.isPriced)
+    const item = dto.itemId ? priced.find((it) => it.id === dto.itemId) : priced[0]
+    if (!item) throw new BadRequestException('ไม่มีรายการที่มีราคาให้ปรับ')
+
+    const vatRate = seller.isVatRegistered ? D(seller.defaultVatRate) : D(0)
+    const whtRate = estimate.whtPercent ? D(estimate.whtPercent).dividedBy(100) : D(0)
+    const solved = reverseFromTarget({
+      target: dto.targetAmount,
+      vatRate,
+      whtRate,
+      afterWht: dto.afterWht,
+    })
+
+    const others = sum(priced.filter((it) => it.id !== item.id).map((it) => it.totalPrice))
+    const itemAmount = solved.base.minus(others)
+    if (itemAmount.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('ยอดที่ขอต่ำกว่าราคารวมของรายการอื่นแล้ว')
+    }
+    const unitPrice = round2(itemAmount.dividedBy(item.quantity))
+    const lineAmount = calcLineAmount(item.quantity, unitPrice)
+    const summary = calcTax({ subtotal: others.plus(lineAmount), vatRate, whtRate })
+    const achieved = dto.afterWht ? summary.netAmount : summary.grandTotal
+
+    if (dto.apply) {
+      await this.prisma.estimateItem.update({
+        where: { id: item.id },
+        data: { unitPrice, totalPrice: lineAmount },
+      })
+      await this.recalcTotal(estimateId)
+      await this.activityLog.write({
+        userId: actorId,
+        action: 'estimate.reverse_priced',
+        targetType: 'Estimate',
+        targetId: estimateId,
+        metadata: { itemId: item.id, target: dto.targetAmount, afterWht: dto.afterWht },
+      })
+    }
+
+    return {
+      targetAmount: round2(dto.targetAmount),
+      afterWht: dto.afterWht,
+      item: { id: item.id, name: item.name, quantity: item.quantity, unitPrice, lineAmount },
+      summary,
+      achieved,
+      diff: achieved.minus(round2(dto.targetAmount)),
+      applied: !!dto.apply,
+    }
+  }
+
   async findOneWithSummary(id: number) {
     const [estimate, seller] = await Promise.all([this.findOne(id), this.company.getProfile()])
     const active = await this.prisma.document.findFirst({

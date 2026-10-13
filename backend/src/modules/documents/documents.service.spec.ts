@@ -111,7 +111,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
   it('ออก QT: snapshot ครบ ยอดคำนวณด้วย Decimal และ Estimate เป็น SENT', async () => {
     const est = await makeEstimate()
-    const doc = await issue(est.id, { vatPercent: 7 })
+    const doc = await issue(est.id)
 
     expect(doc.code).toMatch(/^QT3001\d{3}$/)
     expect(doc.status).toBe('CONFIRMED')
@@ -282,8 +282,8 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
       },
     })
 
-    const preview = await service.previewFromEstimate(est.id, { vatPercent: 7 })
-    const doc = await issue(est.id, { vatPercent: 7 })
+    const preview = await service.previewFromEstimate(est.id, {})
+    const doc = await issue(est.id)
 
     expect(doc.baseAmount.toFixed(2)).toBe('173076.92')
     expect(doc.items[1]).toMatchObject({ isPriced: false })
@@ -315,8 +315,8 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
     const est = await makeEstimate(['100'])
     await prisma.estimate.update({ where: { id: est.id }, data: { whtPercent: 3 } })
 
-    const preview = await service.previewFromEstimate(est.id, { vatPercent: 7 })
-    const doc = await issue(est.id, { vatPercent: 7 })
+    const preview = await service.previewFromEstimate(est.id, {})
+    const doc = await issue(est.id)
 
     expect(doc.whtAmount.toFixed(2)).toBe('4500.00')
     expect(doc.netAmount.toFixed(2)).toBe('156000.00')
@@ -327,7 +327,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
   it('% ที่ไม่มีในตาราง — ยังหักได้ แต่ไม่ผูก whtRateId', async () => {
     const est = await makeEstimate(['100'])
     await prisma.estimate.update({ where: { id: est.id }, data: { whtPercent: 1.5 } })
-    const doc = await issue(est.id, { vatPercent: 7 })
+    const doc = await issue(est.id)
     expect(doc.whtAmount.toFixed(2)).toBe('2250.00')
     expect(doc.whtRateId).toBeNull()
   })

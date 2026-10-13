@@ -20,7 +20,11 @@ import {
   UpsertInstallmentsDto,
   UpsertScheduleDto,
 } from './dto/create-estimate.dto'
-import { UpdateEstimateDto, UpdateEstimateStatusDto } from './dto/update-estimate.dto'
+import {
+  ReversePriceDto,
+  UpdateEstimateDto,
+  UpdateEstimateStatusDto,
+} from './dto/update-estimate.dto'
 import { EstimatesService } from './estimates.service'
 
 @ApiBearerAuth()
@@ -76,6 +80,17 @@ export class EstimatesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.estimatesService.update(id, dto, user.id)
+  }
+
+  @Post(':id/reverse-price')
+  @Permissions('estimate.update')
+  @ApiOperation({ summary: 'คิดย้อนราคาจากยอดที่ลูกค้าจะจ่าย (apply=false ดูผลก่อน)' })
+  reversePrice(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReversePriceDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.estimatesService.reversePrice(id, dto, user.id)
   }
 
   @Patch(':id/status')

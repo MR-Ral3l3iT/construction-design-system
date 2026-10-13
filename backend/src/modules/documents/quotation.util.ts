@@ -34,13 +34,7 @@ export function revisionCode(rootCode: string, revisionNo: number): string {
   return revisionNo === 0 ? rootCode : `${rootCode}-R${revisionNo}`
 }
 
-/** ข้อความเวลาของงวด — "หลังจาก ส่งแบบร่าง ภายใน 2 สัปดาห์" */
-export function installmentTimingText(
-  triggerText?: string | null,
-  withinWeeks?: number | null,
-): string {
-  const parts: string[] = []
-  if (triggerText?.trim()) parts.push(`หลังจาก${triggerText.trim()}`)
-  if (withinWeeks) parts.push(`ภายใน ${withinWeeks} สัปดาห์`)
-  return parts.join(' ')
+/** ข้อความระยะเวลาของงวด — "ภายใน 2 สัปดาห์" (เงื่อนไขของงวดเขียนไว้ในรายละเอียด) */
+export function installmentTimingText(withinWeeks?: number | null): string {
+  return withinWeeks ? `ภายใน ${withinWeeks} สัปดาห์` : ''
 }

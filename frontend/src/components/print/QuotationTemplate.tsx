@@ -372,7 +372,7 @@ export function QuotationTemplate({
                   งวดที่
                 </th>
                 <th style={{ ...S.thDark, textAlign: 'left' }}>รายละเอียด</th>
-                <th style={{ ...S.thDark, textAlign: 'left' }}>กำหนดชำระ</th>
+                <th style={{ ...S.thDark, textAlign: 'left', width: 120 }}>ระยะเวลา</th>
                 <th style={{ ...S.thDark, textAlign: 'right', width: 56 }}>%</th>
                 <th style={{ ...S.thDark, textAlign: 'right', width: 110 }}>จำนวนเงิน</th>
                 <th style={{ ...S.thDark, textAlign: 'right', width: 110 }}>

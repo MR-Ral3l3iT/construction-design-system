@@ -37,8 +37,6 @@ export interface EstimateInstallment {
   id: number
   installmentNo: number
   description: string
-  /** "หลังจาก ..." */
-  triggerText: string | null
   /** "ภายใน x สัปดาห์" */
   withinWeeks: number | null
   percentage: string
@@ -74,6 +72,17 @@ export interface Estimate {
   description: string | null
   status: string
   totalAmount: number
+  /** หัก ณ ที่จ่ายเป็น % — null = ไม่หัก */
+  whtPercent: string | null
+  /** สรุปยอดที่ backend คำนวณ (มีเฉพาะ GET /estimates/:id) */
+  summary?: {
+    baseAmount: string
+    vatRate: string
+    vatAmount: string
+    grandTotal: string
+    whtAmount: string
+    netAmount: string
+  }
   createdAt: string
   updatedAt: string
   project?: { id: number; code: string; name: string; customer?: EstimateCustomer | null }
@@ -215,7 +224,9 @@ export function useCreateEstimate() {
 export function useUpdateEstimate(id: number, projectId?: number) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (payload: Partial<Omit<CreateEstimatePayload, 'projectId'>>) => {
+    mutationFn: async (
+      payload: Partial<Omit<CreateEstimatePayload, 'projectId'>> & { whtPercent?: number | null },
+    ) => {
       const { data } = await api.patch(`/estimates/${id}`, payload)
       return data?.data ?? data
     },
@@ -297,7 +308,6 @@ export function useDeleteEstimateItem(estimateId: number) {
 export interface InstallmentPayload {
   installmentNo: number
   description: string
-  triggerText?: string | null
   withinWeeks?: number | null
   percentage: string
   amount: string

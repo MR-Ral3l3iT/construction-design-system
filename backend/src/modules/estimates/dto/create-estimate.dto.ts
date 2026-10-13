@@ -119,12 +119,6 @@ export class EstimateInstallmentDto {
   @MaxLength(300)
   description: string
 
-  @ApiPropertyOptional({ description: '"หลังจาก ..."', example: 'ส่งมอบแบบร่าง' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(300)
-  triggerText?: string | null
-
   @ApiPropertyOptional({ description: '"ภายใน x สัปดาห์"', example: 2 })
   @IsOptional()
   @IsInt()

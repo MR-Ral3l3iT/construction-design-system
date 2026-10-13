@@ -11,7 +11,6 @@ export interface DocumentInstallment {
   id: number
   installmentNo: number
   description: string
-  triggerText: string | null
   withinWeeks: number | null
   percentage: Money
   amount: Money

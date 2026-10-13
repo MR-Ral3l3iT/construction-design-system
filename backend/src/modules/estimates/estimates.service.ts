@@ -12,8 +12,9 @@ import {
 } from './dto/create-estimate.dto'
 import { UpdateEstimateDto, UpdateEstimateStatusDto } from './dto/update-estimate.dto'
 import { PaginationDto } from '../../common/dto/pagination.dto'
-import { calcLineAmount, sum } from '../../common/utils/money.util'
+import { calcLineAmount, calcTax, D, sum } from '../../common/utils/money.util'
 import { resolveLines } from './item-lines'
+import { CompanyService } from '../company/company.service'
 
 const ITEM_SELECT = {
   id: true,
@@ -57,6 +58,7 @@ const ESTIMATE_SELECT = {
   description: true,
   status: true,
   totalAmount: true,
+  whtPercent: true,
   createdAt: true,
   updatedAt: true,
   project: {
@@ -87,7 +89,6 @@ const ESTIMATE_SELECT = {
       id: true,
       installmentNo: true,
       description: true,
-      triggerText: true,
       withinWeeks: true,
       percentage: true,
       amount: true,
@@ -136,6 +137,7 @@ export class EstimatesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
+    private readonly company: CompanyService,
   ) {}
 
   private calcTotal(items: CreateEstimateItemDto[]) {
@@ -315,6 +317,27 @@ export class EstimatesService {
     return estimate
   }
 
+  /**
+   * รายละเอียดพร้อมสรุปยอด (VAT / หัก ณ ที่จ่าย / สุทธิ) สำหรับหน้าจอ — คำนวณที่ backend
+   * ด้วยวิธีเดียวกับใบเสนอราคา หน้าจอไม่ต้องคิดเงินเอง
+   * VAT ใช้ของฉบับที่ออกล่าสุด ถ้ายังไม่เคยออกใช้ค่าตั้งต้นของบริษัท
+   */
+  async findOneWithSummary(id: number) {
+    const [estimate, seller] = await Promise.all([this.findOne(id), this.company.getProfile()])
+    const active = await this.prisma.document.findFirst({
+      where: { estimateId: id, docType: 'QUOTATION', status: 'CONFIRMED', deletedAt: null },
+      orderBy: { revisionNo: 'desc' },
+      select: { vatRate: true },
+    })
+    const vatRate = active?.vatRate ?? (seller.isVatRegistered ? seller.defaultVatRate : 0)
+    const summary = calcTax({
+      subtotal: estimate.totalAmount,
+      vatRate,
+      whtRate: estimate.whtPercent ? D(estimate.whtPercent).dividedBy(100) : 0,
+    })
+    return { ...estimate, summary }
+  }
+
   async update(id: number, dto: UpdateEstimateDto, actorId: number) {
     const estimate = await this.findOne(id)
     if (estimate.status !== 'DRAFT') {
@@ -334,6 +357,7 @@ export class EstimatesService {
         data: {
           title: dto.title,
           description: dto.description,
+          ...(dto.whtPercent !== undefined && { whtPercent: dto.whtPercent }),
           ...(totalAmount !== undefined && { totalAmount }),
           ...(items && {
             items: {
@@ -501,7 +525,6 @@ export class EstimatesService {
             estimateId,
             installmentNo: inst.installmentNo,
             description: inst.description,
-            triggerText: inst.triggerText?.trim() || null,
             withinWeeks: inst.withinWeeks ?? null,
             percentage: inst.percentage,
             amount: inst.amount,

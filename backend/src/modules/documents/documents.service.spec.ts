@@ -94,7 +94,6 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
           create: installmentPcts.map((p, i) => ({
             installmentNo: i + 1,
             description: `งวด ${i + 1}`,
-            triggerText: i === 0 ? 'เซ็นสัญญา' : null,
             withinWeeks: i === 0 ? 1 : 4,
             percentage: p,
             amount: 0,
@@ -129,7 +128,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
       '60000.00',
       '45000.00',
     ])
-    expect(doc.installments[0]).toMatchObject({ triggerText: 'เซ็นสัญญา', withinWeeks: 1 })
+    expect(doc.installments[0]).toMatchObject({ description: 'งวด 1', withinWeeks: 1 })
     expect(doc.schedule.map((s) => s.name)).toEqual(['แบบร่าง', 'แบบก่อสร้าง'])
 
     const after = await prisma.estimate.findUniqueOrThrow({ where: { id: est.id } })
@@ -203,7 +202,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
     const print = await service.printData(doc.id)
     expect(print.installments[0].netAmount.toFixed(2)).toBe('156000.00')
-    expect(print.installments[0].timingText).toBe('หลังจากเซ็นสัญญา ภายใน 1 สัปดาห์')
+    expect(print.installments[0].timingText).toBe('ภายใน 1 สัปดาห์')
   })
 
   it('นำเข้างวดเงินจาก snapshot หลังลูกค้าอนุมัติ และนำเข้าซ้ำได้ไม่ซ้อน', async () => {
@@ -223,7 +222,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
     expect(milestones).toHaveLength(3)
     expect(milestones.map((m) => m.amount.toFixed(2))).toEqual(['45000.00', '60000.00', '45000.00'])
     expect(milestones.every((m) => m.documentInstallmentId)).toBe(true)
-    expect(milestones[0].description).toContain('หลังจากเซ็นสัญญา')
+    expect(milestones[0].description).toContain('ภายใน 1 สัปดาห์')
   })
 
   it('ยกเลิก QT: ลบงวดที่ยังไม่รับเงิน และ Estimate กลับเป็นร่าง', async () => {
@@ -305,5 +304,31 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
     expect(preview.warnings[0]).toContain('100%')
     expect(preview.installments).toHaveLength(2)
     await expect(issue(est.id)).rejects.toThrow('100%')
+  })
+
+  it('หัก ณ ที่จ่ายตาม % ที่ตั้งในใบประเมิน และจับคู่อัตราในตาราง', async () => {
+    const rate = await prisma.whtRate.upsert({
+      where: { code: 'TEST3' },
+      update: {},
+      create: { code: 'TEST3', rate: 0.03, description: 'ค่าบริการ 3%' },
+    })
+    const est = await makeEstimate(['100'])
+    await prisma.estimate.update({ where: { id: est.id }, data: { whtPercent: 3 } })
+
+    const preview = await service.previewFromEstimate(est.id, { vatPercent: 7 })
+    const doc = await issue(est.id, { vatPercent: 7 })
+
+    expect(doc.whtAmount.toFixed(2)).toBe('4500.00')
+    expect(doc.netAmount.toFixed(2)).toBe('156000.00')
+    expect(doc.whtRateId).toBe(rate.id)
+    expect(preview.netAmount.toFixed(2)).toBe('156000.00')
+  })
+
+  it('% ที่ไม่มีในตาราง — ยังหักได้ แต่ไม่ผูก whtRateId', async () => {
+    const est = await makeEstimate(['100'])
+    await prisma.estimate.update({ where: { id: est.id }, data: { whtPercent: 1.5 } })
+    const doc = await issue(est.id, { vatPercent: 7 })
+    expect(doc.whtAmount.toFixed(2)).toBe('2250.00')
+    expect(doc.whtRateId).toBeNull()
   })
 })

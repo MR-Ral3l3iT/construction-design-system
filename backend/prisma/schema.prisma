@@ -403,6 +403,8 @@ model Estimate {
   description String?
   status      EstimateStatus @default(DRAFT)
   totalAmount Decimal        @default(0) @db.Decimal(15, 2)
+  /// หัก ณ ที่จ่ายที่ลูกค้าจะหัก เป็น % (null = ไม่หัก) — ใช้ตอนออกใบเสนอราคา
+  whtPercent  Decimal?       @db.Decimal(5, 2)
 
   project        Project                 @relation(fields: [projectId], references: [id])
   items          EstimateItem[]
@@ -447,9 +449,7 @@ model EstimateInstallment {
   estimateId    Int
   installmentNo Int
   description   String
-  /// "หลังจาก ..." — เงื่อนไขที่ทำให้งวดถึงกำหนด เช่น "ส่งมอบแบบร่าง"
-  triggerText   String?
-  /// "ภายใน x สัปดาห์" นับจากเงื่อนไขข้างบน
+  /// "ภายใน x สัปดาห์" — เงื่อนไขของงวดเขียนไว้ใน description
   withinWeeks   Int?
   percentage    Decimal @db.Decimal(5, 2)
   amount        Decimal @db.Decimal(15, 2)
@@ -1408,7 +1408,6 @@ model DocumentInstallment {
   documentId    Int
   installmentNo Int
   description   String
-  triggerText   String?
   withinWeeks   Int?
   percentage    Decimal @db.Decimal(5, 2)
   /// ยอดก่อน VAT — ภาษีของงวดคำนวณตอนออกใบแจ้งหนี้

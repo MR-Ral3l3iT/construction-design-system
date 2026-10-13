@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { Eye, FileCheck, X } from 'lucide-react'
-import { Button, Input, Select, Textarea } from '@construction/ui'
+import { Button, Input, Textarea } from '@construction/ui'
 import { FormModal } from '@/components/shared/FormModal'
 import { useCompany } from '@/hooks/useCompany'
-import { useWhtRates } from '@/hooks/useAccountingSettings'
 import { useIssueQuotation } from '@/hooks/useDocuments'
 import { useToast } from '@/providers/toast-provider'
 
@@ -14,7 +13,9 @@ interface Props {
   onClose: () => void
   estimateId: number
   /** ฉบับที่มีผลอยู่ — ถ้ามี ฉบับนี้จะเป็น -R{n} และตั้งภาษีตามฉบับเดิมให้ */
-  previous: { vatRate: string; whtRateId: number | null } | null
+  previous: { vatRate: string } | null
+  /** หัก ณ ที่จ่ายที่ตั้งไว้ในใบประเมิน — null = ไม่หัก */
+  whtPercent: string | null
   onIssued: (documentId: number) => void
 }
 
@@ -23,16 +24,21 @@ function todayISO() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' })
 }
 
-export function IssueQuotationModal({ open, onClose, estimateId, previous, onIssued }: Props) {
+export function IssueQuotationModal({
+  open,
+  onClose,
+  estimateId,
+  previous,
+  whtPercent,
+  onIssued,
+}: Props) {
   const isRevision = !!previous
   const { success, error: toastError } = useToast()
   const { data: company } = useCompany()
-  const { data: whtRates = [] } = useWhtRates()
   const issue = useIssueQuotation(estimateId)
 
   const [documentDate, setDocumentDate] = useState(todayISO())
   const [vatPercent, setVatPercent] = useState('7')
-  const [whtRateId, setWhtRateId] = useState('')
   const [validDays, setValidDays] = useState('30')
   const [note, setNote] = useState('')
 
@@ -44,25 +50,16 @@ export function IssueQuotationModal({ open, onClose, estimateId, previous, onIss
     const toPercent = (rate: string | number) => String(Number((Number(rate) * 100).toFixed(2)))
     if (previous) {
       setVatPercent(toPercent(previous.vatRate))
-      setWhtRateId(previous.whtRateId ? String(previous.whtRateId) : '')
     } else if (company) {
       setVatPercent(company.isVatRegistered ? toPercent(company.defaultVatRate) : '0')
-      setWhtRateId('')
     }
     // พึ่งค่าเท่านั้น ไม่ใช่ object — refetch ระหว่างเปิดหน้าต่างต้องไม่ล้างค่าที่ผู้ใช้กรอก
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    open,
-    company?.defaultVatRate,
-    company?.isVatRegistered,
-    previous?.vatRate,
-    previous?.whtRateId,
-  ])
+  }, [open, company?.defaultVatRate, company?.isVatRegistered, previous?.vatRate])
 
   /** ตัวอย่างด้วยค่าที่เลือกในหน้าต่างนี้ — ภาษี วันที่ หมายเหตุ ตรงกับที่จะออกจริง */
   function openPreview() {
     const q = new URLSearchParams({ vatPercent, documentDate })
-    if (whtRateId) q.set('whtRateId', whtRateId)
     if (validDays) q.set('validDays', validDays)
     if (note.trim()) q.set('note', note.trim())
     window.open(`/print/quotation-preview/${estimateId}?${q}`, '_blank')
@@ -73,7 +70,6 @@ export function IssueQuotationModal({ open, onClose, estimateId, previous, onIss
       const doc = await issue.mutateAsync({
         documentDate,
         vatPercent: Number(vatPercent),
-        whtRateId: whtRateId ? Number(whtRateId) : null,
         validDays: validDays ? Number(validDays) : undefined,
         note: note.trim() || undefined,
       })
@@ -144,18 +140,13 @@ export function IssueQuotationModal({ open, onClose, estimateId, previous, onIss
             value={vatPercent}
             onChange={(e) => setVatPercent(e.target.value)}
           />
-          <Select
-            label="หัก ณ ที่จ่าย"
-            value={whtRateId}
-            onChange={(e) => setWhtRateId(e.target.value)}
-            options={[
-              { value: '', label: 'ไม่หัก' },
-              ...whtRates.map((r) => ({
-                value: String(r.id),
-                label: `${r.percent}% — ${r.description}`,
-              })),
-            ]}
-          />
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-gray-700">หัก ณ ที่จ่าย</p>
+            <p className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+              {whtPercent ? `${Number(whtPercent)}%` : 'ไม่หัก'}
+              <span className="ml-1 text-xs text-gray-400">(ตั้งที่ส่วนรวมทั้งหมด)</span>
+            </p>
+          </div>
         </div>
         <Textarea
           label="หมายเหตุบนเอกสาร"

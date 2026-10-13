@@ -64,7 +64,7 @@ export class EstimatesController {
   @Permissions('estimate.view')
   @ApiOperation({ summary: 'ดูรายละเอียดใบประเมิน' })
   findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.estimatesService.findOne(id)
+    return this.estimatesService.findOneWithSummary(id)
   }
 
   @Patch(':id')

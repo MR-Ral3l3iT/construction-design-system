@@ -40,10 +40,9 @@ describe('revisionCode', () => {
 })
 
 describe('installmentTimingText', () => {
-  it('รวมเงื่อนไขและระยะเวลา', () => {
-    expect(installmentTimingText('ส่งแบบร่าง', 2)).toBe('หลังจากส่งแบบร่าง ภายใน 2 สัปดาห์')
-    expect(installmentTimingText(' เซ็นสัญญา ', null)).toBe('หลังจากเซ็นสัญญา')
-    expect(installmentTimingText(null, 4)).toBe('ภายใน 4 สัปดาห์')
-    expect(installmentTimingText(null, null)).toBe('')
+  it('แสดงระยะเวลาเมื่อมี', () => {
+    expect(installmentTimingText(2)).toBe('ภายใน 2 สัปดาห์')
+    expect(installmentTimingText(null)).toBe('')
+    expect(installmentTimingText(0)).toBe('')
   })
 })

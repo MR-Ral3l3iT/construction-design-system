@@ -27,6 +27,7 @@ import { ImportSubQuotationModal } from '../ImportSubQuotationModal'
 import { IssueQuotationModal } from './IssueQuotationModal'
 import { VoidQuotationModal } from './VoidQuotationModal'
 import { ScheduleEditor } from './ScheduleEditor'
+import { EstimateTotals } from './EstimateTotals'
 import { DescriptionRawEditor } from '../DescriptionRawEditor'
 import { textToLines, type ItemLine } from '@/lib/descLines'
 import {
@@ -43,8 +44,6 @@ import { api } from '@/lib/api'
 
 interface InstallmentRow {
   description: string
-  /** "หลังจาก ..." */
-  triggerText: string
   /** "ภายใน x สัปดาห์" */
   withinWeeks: string
   percentage: string
@@ -53,7 +52,6 @@ interface InstallmentRow {
 const toInstallmentRows = (installments: EstimateInstallment[]): InstallmentRow[] =>
   installments.map((inst) => ({
     description: inst.description,
-    triggerText: inst.triggerText ?? '',
     withinWeeks: inst.withinWeeks != null ? String(inst.withinWeeks) : '',
     percentage: inst.percentage,
   }))
@@ -87,10 +85,7 @@ function InstallmentsEditor({
   }
 
   function addRow() {
-    setRows((prev) => [
-      ...prev,
-      { description: '', triggerText: '', withinWeeks: '', percentage: '' },
-    ])
+    setRows((prev) => [...prev, { description: '', withinWeeks: '', percentage: '' }])
   }
 
   function removeRow(idx: number) {
@@ -109,7 +104,6 @@ function InstallmentsEditor({
         rows.map((r, i) => ({
           installmentNo: i + 1,
           description: r.description,
-          triggerText: r.triggerText.trim() || null,
           withinWeeks: r.withinWeeks ? Number(r.withinWeeks) : null,
           percentage: r.percentage || '0',
           amount: calcAmount(r.percentage).toString(),
@@ -131,7 +125,6 @@ function InstallmentsEditor({
             <tr className="border-b text-left text-xs text-gray-500">
               <th className="pb-2 pr-2 font-medium">งวดที่</th>
               <th className="pb-2 pr-2 font-medium">รายละเอียด</th>
-              <th className="pb-2 pr-2 font-medium">หลังจาก</th>
               <th className="pb-2 pr-2 font-medium w-24">ภายใน (สัปดาห์)</th>
               <th className="pb-2 pr-2 font-medium w-24">สัดส่วน (%)</th>
               <th className="pb-2 pr-2 font-medium w-32 text-right">จำนวนเงิน</th>
@@ -148,21 +141,9 @@ function InstallmentsEditor({
                   ) : (
                     <input
                       className={inputCls}
-                      placeholder="เช่น ค่าออกแบบงวดแรก"
+                      placeholder="เช่น เมื่อเห็นชอบในข้อเสนอและลงนามว่าจ้าง"
                       value={row.description}
                       onChange={(e) => update(idx, 'description', e.target.value)}
-                    />
-                  )}
-                </td>
-                <td className="py-1.5 pr-2 align-middle">
-                  {readOnly ? (
-                    row.triggerText || '-'
-                  ) : (
-                    <input
-                      className={inputCls}
-                      placeholder="เช่น เซ็นสัญญา, ส่งแบบร่าง"
-                      value={row.triggerText}
-                      onChange={(e) => update(idx, 'triggerText', e.target.value)}
                     />
                   )}
                 </td>
@@ -597,12 +578,7 @@ export function EstimateDetailContent({ id, projectId }: Props) {
             <>
               <Table columns={itemColumns} data={items} keyExtractor={(item) => String(item.id)} />
               <div className="mt-4 flex justify-end border-t pt-4">
-                <div className="text-right">
-                  <p className="text-sm text-gray-500">รวมทั้งหมด</p>
-                  <p className="text-xl font-bold text-primary-600">
-                    {formatCurrency(estimate.totalAmount)}
-                  </p>
-                </div>
+                <EstimateTotals estimate={estimate} editable={isDraft} />
               </div>
             </>
           )}
@@ -730,6 +706,7 @@ export function EstimateDetailContent({ id, projectId }: Props) {
         onClose={() => setIssueOpen(false)}
         estimateId={id}
         previous={activeQuotation}
+        whtPercent={estimate.whtPercent}
         onIssued={openPrint}
       />
       <VoidQuotationModal

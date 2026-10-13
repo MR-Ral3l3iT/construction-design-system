@@ -83,7 +83,6 @@ const DOCUMENT_DETAIL_SELECT = {
       id: true,
       installmentNo: true,
       description: true,
-      triggerText: true,
       withinWeeks: true,
       percentage: true,
       amount: true,
@@ -128,6 +127,7 @@ const ESTIMATE_FOR_QUOTATION = {
   code: true,
   title: true,
   status: true,
+  whtPercent: true,
   project: {
     select: {
       id: true,
@@ -158,7 +158,8 @@ type EstimateForQuotation = Prisma.EstimateGetPayload<{ select: typeof ESTIMATE_
 
 interface TaxSettings {
   vatRate: Prisma.Decimal
-  whtRate: { id: number; rate: Prisma.Decimal } | null
+  /** id = อัตราในตาราง wht_rates ที่ตรงกัน (ไว้ออก 50 ทวิ) — null ถ้าเป็น % ที่ไม่มีในตาราง */
+  whtRate: { id: number | null; rate: Prisma.Decimal } | null
 }
 
 /**
@@ -223,7 +224,6 @@ function buildQuotation(estimate: EstimateForQuotation, tax: TaxSettings, strict
   const installments = estimate.installments.map((inst, idx) => ({
     installmentNo: idx + 1,
     description: inst.description,
-    triggerText: inst.triggerText,
     withinWeeks: inst.withinWeeks,
     percentage: inst.percentage,
     amount: amounts[idx],
@@ -260,7 +260,6 @@ export class DocumentsService {
    */
   async issueFromEstimate(estimateId: number, dto: IssueQuotationDto, actorId: number) {
     const seller = await this.company.getProfile()
-    const taxSettings = await this.resolveTaxSettings(dto, seller)
     const { documentDate, dueDate } = documentDates(dto)
 
     const doc = await this.prisma.$transaction(async (tx) => {
@@ -278,6 +277,7 @@ export class DocumentsService {
         )
       }
 
+      const taxSettings = await this.resolveTaxSettings(dto, seller, estimate.whtPercent)
       const built = buildQuotation(estimate, taxSettings, true)
       const tax = built.totals
 
@@ -375,18 +375,32 @@ export class DocumentsService {
     return this.findOne(doc.id)
   }
 
-  /** VAT / หัก ณ ที่จ่ายที่ผู้ออกเลือก — ไม่ระบุ VAT ใช้ค่าตั้งต้นของบริษัท */
+  /**
+   * VAT / หัก ณ ที่จ่ายของใบเสนอราคา
+   * - VAT: ที่ผู้ออกเลือก ไม่ระบุ = ค่าตั้งต้นของบริษัท
+   * - หัก ณ ที่จ่าย: whtRateId ที่ส่งมา (API เดิม) มาก่อน ไม่งั้นใช้ % ที่ตั้งไว้ในใบประเมิน
+   */
   private async resolveTaxSettings(
     dto: Pick<IssueQuotationDto, 'vatPercent' | 'whtRateId'>,
     seller: { isVatRegistered: boolean; defaultVatRate: Prisma.Decimal },
+    estimateWhtPercent: Prisma.Decimal | null,
   ): Promise<TaxSettings> {
-    const whtRate = dto.whtRateId
-      ? await this.prisma.whtRate.findFirst({
-          where: { id: dto.whtRateId, isActive: true },
-          select: { id: true, rate: true },
-        })
-      : null
-    if (dto.whtRateId && !whtRate) throw new BadRequestException('ไม่พบอัตราหัก ณ ที่จ่ายที่เลือก')
+    let whtRate: TaxSettings['whtRate'] = null
+    if (dto.whtRateId) {
+      whtRate = await this.prisma.whtRate.findFirst({
+        where: { id: dto.whtRateId, isActive: true },
+        select: { id: true, rate: true },
+      })
+      if (!whtRate) throw new BadRequestException('ไม่พบอัตราหัก ณ ที่จ่ายที่เลือก')
+    } else if (estimateWhtPercent && D(estimateWhtPercent).greaterThan(0)) {
+      const rate = round4(D(estimateWhtPercent).dividedBy(100))
+      const match = await this.prisma.whtRate.findFirst({
+        where: { rate, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+        select: { id: true },
+      })
+      whtRate = { id: match?.id ?? null, rate }
+    }
 
     const vatRate =
       dto.vatPercent !== undefined
@@ -411,17 +425,19 @@ export class DocumentsService {
       this.prisma.document.findFirst({
         where: ACTIVE_QUOTATION(estimateId),
         orderBy: { revisionNo: 'desc' },
-        select: { code: true, vatRate: true, whtRateId: true },
+        select: { code: true, vatRate: true },
       }),
     ])
     if (!estimate) throw new NotFoundException('ไม่พบใบประเมิน')
 
-    const noTaxChoice = dto.vatPercent === undefined && dto.whtRateId === undefined
+    // ไม่ระบุ VAT → ใช้ของฉบับที่มีผลอยู่ (ถ้ามี) · หัก ณ ที่จ่ายมาจากใบประเมินเสมอ
     const taxSettings = await this.resolveTaxSettings(
-      noTaxChoice && active
-        ? { vatPercent: Number(active.vatRate) * 100, whtRateId: active.whtRateId }
-        : dto,
+      {
+        ...dto,
+        vatPercent: dto.vatPercent ?? (active ? Number(active.vatRate) * 100 : undefined),
+      },
       seller,
+      estimate.whtPercent,
     )
     const { documentDate, dueDate } = documentDates(dto)
     const built = buildQuotation(estimate, taxSettings, false)
@@ -466,7 +482,6 @@ export class DocumentsService {
       whtRate: Prisma.Decimal
       installments: Array<{
         amount: Prisma.Decimal
-        triggerText: string | null
         withinWeeks: number | null
       }>
     },
@@ -477,7 +492,7 @@ export class DocumentsService {
         const t = calcTax({ subtotal: inst.amount, vatRate: doc.vatRate, whtRate: doc.whtRate })
         return {
           ...inst,
-          timingText: installmentTimingText(inst.triggerText, inst.withinWeeks),
+          timingText: installmentTimingText(inst.withinWeeks),
           vatAmount: t.vatAmount,
           whtAmount: t.whtAmount,
           netAmount: t.netAmount,
@@ -654,7 +669,7 @@ export class DocumentsService {
       })
       await tx.paymentMilestone.createMany({
         data: doc.installments.map((inst) => {
-          const timing = installmentTimingText(inst.triggerText, inst.withinWeeks)
+          const timing = installmentTimingText(inst.withinWeeks)
           return {
             projectId,
             estimateId,

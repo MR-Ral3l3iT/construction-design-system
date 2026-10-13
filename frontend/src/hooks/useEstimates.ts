@@ -2,11 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import type { ItemLine } from '@/lib/descLines'
 
 export interface EstimateItem {
   id: number
   name: string
   description: string | null
+  /** บรรทัดรายละเอียดพร้อมรูปแบบ — null สำหรับรายการที่ยังไม่เคยมีรายละเอียด */
+  lines: ItemLine[] | null
+  /** false = หัวข้อหมวดที่ไม่มีราคา */
+  isPriced: boolean
   quantity: number
   unit: string | null
   unitPrice: number
@@ -92,6 +97,8 @@ export interface CreateEstimatePayload {
 export interface EstimateItemPayload {
   name: string
   description?: string
+  lines?: ItemLine[]
+  isPriced?: boolean
   quantity?: number
   unit?: string
   unitPrice?: number

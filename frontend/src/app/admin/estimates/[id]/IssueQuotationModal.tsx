@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FileCheck, X } from 'lucide-react'
+import { Eye, FileCheck, X } from 'lucide-react'
 import { Button, Input, Select, Textarea } from '@construction/ui'
 import { FormModal } from '@/components/shared/FormModal'
 import { useCompany } from '@/hooks/useCompany'
@@ -59,6 +59,15 @@ export function IssueQuotationModal({ open, onClose, estimateId, previous, onIss
     previous?.whtRateId,
   ])
 
+  /** ตัวอย่างด้วยค่าที่เลือกในหน้าต่างนี้ — ภาษี วันที่ หมายเหตุ ตรงกับที่จะออกจริง */
+  function openPreview() {
+    const q = new URLSearchParams({ vatPercent, documentDate })
+    if (whtRateId) q.set('whtRateId', whtRateId)
+    if (validDays) q.set('validDays', validDays)
+    if (note.trim()) q.set('note', note.trim())
+    window.open(`/print/quotation-preview/${estimateId}?${q}`, '_blank')
+  }
+
   async function handleSubmit() {
     try {
       const doc = await issue.mutateAsync({
@@ -91,6 +100,9 @@ export function IssueQuotationModal({ open, onClose, estimateId, previous, onIss
       size="md"
       footer={
         <div className="flex justify-end gap-2">
+          <Button variant="outline" icon={Eye} onClick={openPreview} disabled={issue.isPending}>
+            ดูตัวอย่าง
+          </Button>
           <Button variant="ghost" icon={X} onClick={onClose} disabled={issue.isPending}>
             ยกเลิก
           </Button>

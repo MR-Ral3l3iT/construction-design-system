@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import type { ItemLine } from '@/lib/descLines'
 
 /** ยอดเงินจาก backend เป็น string (Prisma Decimal) — แปลงด้วย Number() ตอนแสดงผลเท่านั้น */
 type Money = string
@@ -29,7 +30,8 @@ export interface AccountingDocument {
   id: number
   code: string | null
   docType: string
-  status: 'DRAFT' | 'CONFIRMED' | 'SUPERSEDED' | 'VOIDED'
+  /** PREVIEW = ตัวอย่างจากร่าง ยังไม่ได้บันทึก */
+  status: 'DRAFT' | 'CONFIRMED' | 'SUPERSEDED' | 'VOIDED' | 'PREVIEW'
   revisionNo: number
   documentDate: string
   dueDate: string | null
@@ -63,6 +65,8 @@ export interface AccountingDocument {
     id: number
     name: string
     description: string | null
+    lines: ItemLine[] | null
+    isPriced: boolean
     quantity: Money
     unit: string | null
     unitPrice: Money
@@ -82,6 +86,10 @@ export interface DocumentPrintData extends AccountingDocument {
   })[]
   sellerLogoUrl: string | null
   sellerSignatureName: string | null
+  /** preview เท่านั้น — เช่นงวดรวมไม่ครบ 100% */
+  warnings: string[]
+  /** preview เท่านั้น — เลขฉบับที่มีผลอยู่ ถ้าออกตอนนี้จะเป็นฉบับแก้ไขของเลขนี้ */
+  willRevise: string | null
 }
 
 export interface IssueQuotationPayload {
@@ -100,6 +108,23 @@ export function useDocumentPrintData(id: number) {
       return data?.data ?? data
     },
     enabled: id > 0,
+  })
+}
+
+/**
+ * ตัวอย่างใบเสนอราคาจากร่าง — backend คำนวณแบบเดียวกับตอนออกจริงแต่ไม่บันทึก
+ * ไม่ส่งภาษี = ใช้ค่าของฉบับที่มีผลอยู่ หรือค่าตั้งต้นของบริษัท
+ */
+export function useQuotationPreview(estimateId: number, params: IssueQuotationPayload = {}) {
+  return useQuery<DocumentPrintData>({
+    queryKey: ['documents', 'preview', estimateId, params],
+    queryFn: async () => {
+      const { data } = await api.get(`/documents/preview-from-estimate/${estimateId}`, {
+        params,
+      })
+      return data?.data ?? data
+    },
+    enabled: estimateId > 0,
   })
 }
 

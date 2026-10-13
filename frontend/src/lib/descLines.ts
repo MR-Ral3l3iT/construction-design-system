@@ -61,3 +61,37 @@ export function setBulletAll(text: string, on: boolean): string {
     })
     .join('\n')
 }
+
+/** บรรทัดรายละเอียดพร้อมรูปแบบ — ตรงกับ ItemLine ของ backend */
+export interface ItemLine {
+  text: string
+  bold?: boolean
+  /** ไฮไลต์สีแดง */
+  highlight?: boolean
+}
+
+/** lines → ข้อความสำหรับ Raw Editor (รูปแบบหายในโหมดข้อความ แต่ textToLines คืนให้) */
+export function linesToText(lines: ItemLine[]): string {
+  return lines.map((l) => l.text).join('\n')
+}
+
+/**
+ * ข้อความจาก Raw Editor → lines
+ *
+ * รักษาตัวหนา/สีของบรรทัดที่ข้อความไม่เปลี่ยน โดยจับคู่กับบรรทัดเดิมที่ข้อความเหมือนกัน
+ * และยังไม่ถูกใช้ ไล่จากบนลงล่าง — ต่างจาก KK ที่ดูแค่ตำแหน่งเดิม ทำให้แทรกบรรทัดกลาง
+ * รายการแล้วรูปแบบของบรรทัดด้านล่างไม่หลุด
+ */
+export function textToLines(text: string, previous: ItemLine[] = []): ItemLine[] {
+  const pool = previous.map((l) => ({ line: l, used: false }))
+  const normalized = normalizeDescription(text)
+  if (normalized === '') return []
+  return normalized.split('\n').map((t) => {
+    const match = pool.find((p) => !p.used && p.line.text === t)
+    if (match) {
+      match.used = true
+      return { ...match.line, text: t }
+    }
+    return { text: t }
+  })
+}

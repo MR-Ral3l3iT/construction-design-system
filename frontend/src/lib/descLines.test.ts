@@ -6,6 +6,8 @@ import {
   normalizeDescription,
   setBulletAll,
   toggleBullet,
+  linesToText,
+  textToLines,
 } from './descLines'
 
 describe('normalizeDescription', () => {
@@ -68,5 +70,46 @@ describe('setBulletAll', () => {
 
   it('บรรทัดว่างไม่ถูกเติม', () => {
     expect(setBulletAll('ก\n\nข', true)).toBe('- ก\n\n- ข')
+  })
+})
+
+describe('textToLines / linesToText', () => {
+  const prev = [
+    { text: 'First concept design', bold: true },
+    { text: '  แบบแปลนลงสี' },
+    { text: '  soft scape', highlight: true },
+  ]
+
+  it('ไปกลับได้ และคงรูปแบบเมื่อไม่ได้แก้', () => {
+    expect(textToLines(linesToText(prev), prev)).toEqual(prev)
+  })
+
+  it('แทรกบรรทัดกลางแล้วรูปแบบของบรรทัดด้านล่างไม่หลุด', () => {
+    const text = 'First concept design\n  บรรทัดใหม่\n  แบบแปลนลงสี\n  soft scape'
+    expect(textToLines(text, prev)).toEqual([
+      { text: 'First concept design', bold: true },
+      { text: '  บรรทัดใหม่' },
+      { text: '  แบบแปลนลงสี' },
+      { text: '  soft scape', highlight: true },
+    ])
+  })
+
+  it('บรรทัดที่ถูกแก้ข้อความ → ไม่ติดรูปแบบเดิม', () => {
+    expect(textToLines('First concept design (แก้)', prev)).toEqual([
+      { text: 'First concept design (แก้)' },
+    ])
+  })
+
+  it('ข้อความซ้ำกันจับคู่ทีละบรรทัด ไม่ใช้รูปแบบซ้ำ', () => {
+    const dup = [{ text: 'ก', bold: true }, { text: 'ก' }]
+    expect(textToLines('ก\nก\nก', dup)).toEqual([
+      { text: 'ก', bold: true },
+      { text: 'ก' },
+      { text: 'ก' },
+    ])
+  })
+
+  it('ข้อความว่าง → ไม่มีบรรทัด', () => {
+    expect(textToLines('\n  \n', prev)).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-export default function EstimatesPrintLayout({ children }: { children: React.ReactNode }) {
+export default function QuotationPreviewLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <style>{`

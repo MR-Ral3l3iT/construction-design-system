@@ -22,9 +22,11 @@ function EstimateDetailPageInner({ estimateId }: { estimateId: number }) {
   // ออกใบเสนอราคาแล้ว → พิมพ์ฉบับจริงที่มีเลขที่ ไม่ใช่ร่างที่อาจแก้ไปแล้ว
   const { data: estimate } = useEstimate(estimateId)
   const activeQuotation = estimate?.documents?.find((d) => d.status === 'CONFIRMED')
-  const printHref = activeQuotation
+  // ร่าง → preview จาก template เดียวกับฉบับจริง · ออกแล้วและไม่ได้แก้ → พิมพ์ฉบับที่มีเลข
+  const showIssued = activeQuotation && estimate?.status !== 'DRAFT'
+  const printHref = showIssued
     ? `/print/document/${activeQuotation.id}`
-    : `/print/estimates/${estimateId}`
+    : `/print/quotation-preview/${estimateId}`
 
   return (
     <div>
@@ -57,7 +59,7 @@ function EstimateDetailPageInner({ estimateId }: { estimateId: number }) {
               className="inline-flex items-center gap-1.5 rounded-lg bg-sidebar px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-sidebar-hover"
             >
               <Printer className="h-4 w-4" />
-              {activeQuotation ? `Export PDF ${activeQuotation.code}` : 'Export PDF (ร่าง)'}
+              {showIssued ? `Export PDF ${activeQuotation.code}` : 'Preview PDF'}
             </button>
             <Link href={backHref}>
               <Button variant="outline" size="sm" icon={ArrowLeft}>

@@ -27,7 +27,8 @@ import { ImportSubQuotationModal } from '../ImportSubQuotationModal'
 import { IssueQuotationModal } from './IssueQuotationModal'
 import { VoidQuotationModal } from './VoidQuotationModal'
 import { ScheduleEditor } from './ScheduleEditor'
-import { DescriptionRawEditor } from './DescriptionRawEditor'
+import { DescriptionRawEditor } from '../DescriptionRawEditor'
+import { textToLines, type ItemLine } from '@/lib/descLines'
 import {
   useEstimate,
   useDeleteEstimateItem,
@@ -250,6 +251,10 @@ function InstallmentsEditor({
   )
 }
 
+/** รายการเก่าที่ยังไม่มี lines → แตกจาก description */
+const itemLines = (item: EstimateItem): ItemLine[] =>
+  item.lines ?? textToLines(item.description ?? '')
+
 const QUOTATION_STATUS_LABEL: Record<string, string> = {
   CONFIRMED: 'มีผล',
   SUPERSEDED: 'ถูกแทนด้วยฉบับใหม่',
@@ -339,38 +344,57 @@ export function EstimateDetailContent({ id, projectId }: Props) {
       header: 'รายการ',
       render: (item: EstimateItem) => (
         <div>
-          <p className="font-medium text-gray-900">{item.name}</p>
-          {item.description && (
-            <p className="whitespace-pre-wrap text-xs text-gray-500">{item.description}</p>
-          )}
+          <p className="font-medium text-gray-900">
+            <span className="underline">{item.name}</span>
+            {!item.isPriced && (
+              <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-500">
+                ไม่มีราคา
+              </span>
+            )}
+          </p>
+          {itemLines(item).map((l, i) => (
+            <p
+              key={i}
+              className={`whitespace-pre-wrap text-xs ${l.bold ? 'font-semibold' : ''} ${
+                l.highlight ? 'text-red-600' : l.bold ? 'text-gray-800' : 'text-gray-500'
+              }`}
+            >
+              {l.text}
+            </p>
+          ))}
         </div>
       ),
     },
     {
       key: 'quantity',
       header: 'จำนวน',
-      render: (item: EstimateItem) => (
-        <span className="text-sm text-gray-700">
-          {item.quantity}
-          {item.unit && (
-            <span className="ml-1 rounded bg-gray-100 px-1 text-xs text-gray-500">{item.unit}</span>
-          )}
-        </span>
-      ),
+      render: (item: EstimateItem) =>
+        !item.isPriced ? null : (
+          <span className="text-sm text-gray-700">
+            {item.quantity}
+            {item.unit && (
+              <span className="ml-1 rounded bg-gray-100 px-1 text-xs text-gray-500">
+                {item.unit}
+              </span>
+            )}
+          </span>
+        ),
     },
     {
       key: 'unitPrice',
       header: 'ราคาต่อหน่วย',
-      render: (item: EstimateItem) => (
-        <span className="text-sm text-gray-700">{formatCurrency(item.unitPrice)}</span>
-      ),
+      render: (item: EstimateItem) =>
+        item.isPriced ? (
+          <span className="text-sm text-gray-700">{formatCurrency(item.unitPrice)}</span>
+        ) : null,
     },
     {
       key: 'totalPrice',
       header: 'รวม',
-      render: (item: EstimateItem) => (
-        <span className="font-medium text-gray-900">{formatCurrency(item.totalPrice)}</span>
-      ),
+      render: (item: EstimateItem) =>
+        item.isPriced ? (
+          <span className="font-medium text-gray-900">{formatCurrency(item.totalPrice)}</span>
+        ) : null,
     },
     ...(isDraft
       ? [
@@ -687,12 +711,12 @@ export function EstimateDetailContent({ id, projectId }: Props) {
       {rawEditItem && (
         <DescriptionRawEditor
           itemName={rawEditItem.name}
-          description={rawEditItem.description ?? ''}
+          lines={itemLines(rawEditItem)}
           saving={updateItem.isPending}
-          onClose={() => setRawEditItem(null)}
-          onApply={async (description) => {
+          onCancel={() => setRawEditItem(null)}
+          onApply={async (lines) => {
             try {
-              await updateItem.mutateAsync({ itemId: rawEditItem.id, payload: { description } })
+              await updateItem.mutateAsync({ itemId: rawEditItem.id, payload: { lines } })
               success('อัปเดตรายละเอียดสำเร็จ')
               setRawEditItem(null)
             } catch {

@@ -71,6 +71,8 @@ const ESTIMATE_SELECT = {
   status: true,
   totalAmount: true,
   whtPercent: true,
+  scheduleRevision: true,
+  scheduleUpdatedAt: true,
   createdAt: true,
   updatedAt: true,
   project: {
@@ -587,19 +589,20 @@ export class EstimatesService {
   }
 
   /**
-   * ใบที่ออกใบเสนอราคาแล้วแก้งวด/schedule ได้เฉพาะตอนเป็นร่าง (ก่อนออกฉบับแก้ไข)
+   * ใบที่ออกใบเสนอราคาแล้วแก้งวดได้เฉพาะตอนเป็นร่าง (ก่อนออกฉบับแก้ไข) เพราะงวดผูกกับเงิน
    * ใบรุ่นเก่าที่ยังไม่เคยออกเอกสารคงพฤติกรรมเดิม — แก้ได้ทุกสถานะ
+   * (schedule ไม่อยู่ใต้กฎนี้ — แก้ได้ตลอด ดู upsertSchedule)
    */
-  private assertScheduleEditable(estimate: { status: string; documents: unknown[] }) {
+  private assertInstallmentsEditable(estimate: { status: string; documents: unknown[] }) {
     if (estimate.status !== 'DRAFT' && estimate.documents.length > 0) {
       throw new BadRequestException(
-        'ใบเสนอราคาออกไปแล้ว — กด "แก้ไขเพื่อออกฉบับใหม่" ก่อนจึงจะแก้งวดหรือ schedule ได้',
+        'ใบเสนอราคาออกไปแล้ว — กด "แก้ไขเพื่อออกฉบับใหม่" ก่อนจึงจะแก้งวดได้',
       )
     }
   }
 
   async upsertInstallments(estimateId: number, installments: EstimateInstallmentDto[]) {
-    this.assertScheduleEditable(await this.findOne(estimateId))
+    this.assertInstallmentsEditable(await this.findOne(estimateId))
     await this.prisma.$transaction(async (tx) => {
       await tx.estimateInstallment.deleteMany({ where: { estimateId } })
       if (installments.length) {
@@ -618,8 +621,18 @@ export class EstimatesService {
     return this.findOne(estimateId)
   }
 
+  /**
+   * schedule แก้ได้ตลอด แม้ออกใบเสนอราคาแล้ว — แผนงานเลื่อนได้หลังเซ็นโดยไม่ต้องออกใบใหม่
+   * ฉบับตอนเซ็นอยู่ใน snapshot ของใบเสนอราคา · ที่นี่เก็บแค่ฉบับล่าสุด + ครั้งที่ปรับปรุง
+   * (นับเฉพาะเมื่อมีใบเสนอราคาที่มีผลอยู่และเนื้อหาเปลี่ยนจริง)
+   */
   async upsertSchedule(estimateId: number, phases: EstimateSchedulePhaseDto[]) {
-    this.assertScheduleEditable(await this.findOne(estimateId))
+    const estimate = await this.findOne(estimateId)
+    const hasActiveQuotation = estimate.documents.some((d) => d.status === 'CONFIRMED')
+    const key = (p: { name: string; startWeek: number; durationWeeks: number }) =>
+      `${p.name.trim()}|${p.startWeek}|${p.durationWeeks}`
+    const changed = estimate.schedulePhases.map(key).join('\n') !== phases.map(key).join('\n')
+
     await this.prisma.$transaction(async (tx) => {
       await tx.estimateSchedulePhase.deleteMany({ where: { estimateId } })
       if (phases.length) {
@@ -634,8 +647,42 @@ export class EstimatesService {
           })),
         })
       }
+      if (hasActiveQuotation && changed) {
+        await tx.estimate.update({
+          where: { id: estimateId },
+          data: { scheduleRevision: { increment: 1 }, scheduleUpdatedAt: new Date() },
+        })
+      }
     })
     return this.findOne(estimateId)
+  }
+
+  /** ข้อมูลหน้าพิมพ์แผนงานแยก — ใช้ schedule ล่าสุด อ้างใบเสนอราคาที่มีผลอยู่ */
+  async schedulePrint(estimateId: number) {
+    const [estimate, seller] = await Promise.all([
+      this.findOne(estimateId),
+      this.company.getProfile(),
+    ])
+    const quotation = await this.prisma.document.findFirst({
+      where: { estimateId, docType: 'QUOTATION', status: 'CONFIRMED', deletedAt: null },
+      orderBy: { revisionNo: 'desc' },
+      select: { id: true, code: true, documentDate: true },
+    })
+    const customer = estimate.project.customer
+    return {
+      estimateId,
+      title: estimate.title,
+      projectName: estimate.project.name,
+      partyName: customer?.companyName || customer?.name || null,
+      quotation,
+      scheduleRevision: estimate.scheduleRevision,
+      scheduleUpdatedAt: estimate.scheduleUpdatedAt,
+      phases: estimate.schedulePhases,
+      sellerName: seller.name,
+      sellerLogoUrl: seller.logoUrl,
+      sellerAddress: seller.address,
+      sellerContact: seller.contactLine,
+    }
   }
 
   private async recalcTotal(estimateId: number) {

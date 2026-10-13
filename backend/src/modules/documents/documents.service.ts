@@ -368,7 +368,11 @@ export class DocumentsService {
         select: { id: true, code: true, revisionNo: true },
       })
 
-      await tx.estimate.update({ where: { id: estimate.id }, data: { status: 'SENT' } })
+      // schedule ตอนนี้กลายเป็นฉบับในใบเสนอราคาใหม่ — ตัวนับการปรับปรุงเริ่มใหม่
+      await tx.estimate.update({
+        where: { id: estimate.id },
+        data: { status: 'SENT', scheduleRevision: 0, scheduleUpdatedAt: null },
+      })
 
       return created
     })

@@ -133,6 +133,13 @@ export class EstimatesController {
     return this.estimatesService.upsertInstallments(id, body.installments)
   }
 
+  @Get(':id/schedule-print')
+  @Permissions('estimate.view')
+  @ApiOperation({ summary: 'ข้อมูลหน้าพิมพ์แผนงานแยก (schedule ล่าสุด)' })
+  schedulePrint(@Param('id', ParseIntPipe) id: number) {
+    return this.estimatesService.schedulePrint(id)
+  }
+
   @Patch(':id/schedule')
   @Permissions('estimate.update')
   @ApiOperation({ summary: 'บันทึก schedule ของใบเสนอราคา (replace all)' })

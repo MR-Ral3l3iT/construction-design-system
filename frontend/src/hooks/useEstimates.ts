@@ -74,6 +74,9 @@ export interface Estimate {
   totalAmount: number
   /** หัก ณ ที่จ่ายเป็น % — null = ไม่หัก */
   whtPercent: string | null
+  /** schedule ปรับปรุงหลังออกใบเสนอราคากี่ครั้ง — 0 = ตรงกับฉบับในใบเสนอราคา */
+  scheduleRevision: number
+  scheduleUpdatedAt: string | null
   /** สรุปยอดที่ backend คำนวณ (มีเฉพาะ GET /estimates/:id) */
   summary?: {
     baseAmount: string
@@ -383,5 +386,30 @@ export function useReversePrice(estimateId: number) {
     onSuccess: (result) => {
       if (result.applied) qc.invalidateQueries({ queryKey: ['estimates', estimateId] })
     },
+  })
+}
+
+export interface SchedulePrintData {
+  estimateId: number
+  title: string
+  projectName: string
+  partyName: string | null
+  quotation: { id: number; code: string; documentDate: string } | null
+  scheduleRevision: number
+  scheduleUpdatedAt: string | null
+  phases: EstimateSchedulePhase[]
+  sellerName: string
+  sellerLogoUrl: string | null
+}
+
+/** ข้อมูลหน้าพิมพ์แผนงานแยก — schedule ล่าสุด */
+export function useSchedulePrint(estimateId: number) {
+  return useQuery<SchedulePrintData>({
+    queryKey: ['estimates', estimateId, 'schedule-print'],
+    queryFn: async () => {
+      const { data } = await api.get(`/estimates/${estimateId}/schedule-print`)
+      return data?.data ?? data
+    },
+    enabled: estimateId > 0,
   })
 }

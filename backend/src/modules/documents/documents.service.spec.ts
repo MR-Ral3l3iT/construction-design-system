@@ -4,6 +4,7 @@ import { PrismaService } from '../../database/prisma.service'
 import { CompanyService } from '../company/company.service'
 import { DocumentSequenceService } from '../company/document-sequence.service'
 import { DocumentsService } from './documents.service'
+import { EstimatesService } from '../estimates/estimates.service'
 
 /**
  * สายใบเสนอราคา Estimate → Document QT ทั้งเส้น — ต้องใช้ DB จริง
@@ -17,6 +18,7 @@ const describeDb = TEST_DB ? describe : describe.skip
 describeDb('DocumentsService — ใบเสนอราคาจาก Estimate (ต้องมี TEST_DATABASE_URL)', () => {
   let prisma: PrismaClient
   let service: DocumentsService
+  let estimates: EstimatesService
   let projectId: number
   const ACTOR = 1
   // งวดของเลขที่ที่ไม่ชนกับ suite อื่น — ทุกใบในไฟล์นี้ออกด้วยวันที่นี้
@@ -31,6 +33,7 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
     await prisma.$connect()
     const db = prisma as unknown as PrismaService
     const log = new ActivityLogService(db)
+    estimates = new EstimatesService(db, log, new CompanyService(db, log))
     service = new DocumentsService(
       db,
       new CompanyService(db, log),
@@ -370,5 +373,37 @@ describeDb('DocumentsService — ใบเสนอราคาจาก Estimat
 
     const print = await service.printData(doc.id)
     expect(print.installments[0].timingText).toBe('') // งวดแรกไม่ระบุสัปดาห์
+  })
+
+  it('schedule แก้ได้หลังออกใบเสนอราคา: นับครั้งเมื่อเปลี่ยนจริง snapshot เดิมไม่เปลี่ยน ออกใหม่แล้วรีเซ็ต', async () => {
+    const est = await makeEstimate()
+    const doc = await issue(est.id)
+    const phases = [
+      { name: 'แบบร่าง', startWeek: 1, durationWeeks: 5 },
+      { name: 'แบบก่อสร้าง', startWeek: 6, durationWeeks: 6 },
+    ]
+
+    await estimates.upsertSchedule(est.id, phases)
+    await estimates.upsertSchedule(est.id, phases) // บันทึกซ้ำ ไม่เปลี่ยน → ไม่นับ
+    let e = await estimates.findOne(est.id)
+    expect(e.scheduleRevision).toBe(1)
+    expect(e.scheduleUpdatedAt).not.toBeNull()
+    expect(e.status).toBe('SENT') // แก้ schedule ไม่ต้องกลับเป็นร่าง
+
+    // ใบเสนอราคายังเป็นฉบับตอนออก
+    expect((await service.findOne(doc.id)).schedule[0].durationWeeks).toBe(4)
+    const print = await estimates.schedulePrint(est.id)
+    expect(print.phases[0].durationWeeks).toBe(5)
+    expect(print.quotation?.code).toBe(doc.code)
+
+    // งวดยังล็อกอยู่
+    await expect(estimates.upsertInstallments(est.id, [])).rejects.toThrow('แก้งวด')
+
+    // ออกฉบับแก้ไข → schedule ล่าสุดกลายเป็นฉบับในใบใหม่ ตัวนับเริ่มใหม่
+    await prisma.estimate.update({ where: { id: est.id }, data: { status: 'DRAFT' } })
+    const r1 = await issue(est.id)
+    e = await estimates.findOne(est.id)
+    expect(e.scheduleRevision).toBe(0)
+    expect(r1.schedule[0].durationWeeks).toBe(5)
   })
 })

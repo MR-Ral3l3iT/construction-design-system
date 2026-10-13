@@ -625,15 +625,39 @@ export function EstimateDetailContent({ id, projectId }: Props) {
       {/* Schedule */}
       <Card>
         <CardBody>
-          <h3 className="mb-1 font-medium text-gray-900">Schedule แผนงาน</h3>
-          <p className="mb-4 text-xs text-gray-500">
-            พิมพ์ลงใบเสนอราคา — แยกจากแผนงานโครงการ นับเป็นสัปดาห์จากวันเริ่มงาน
-          </p>
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h3 className="mb-1 font-medium text-gray-900">Schedule แผนงาน</h3>
+              <p className="text-xs text-gray-500">
+                แนบท้ายใบเสนอราคา (หน้าแยก) — แก้ได้แม้ออกใบเสนอราคาแล้ว ไม่ต้องออกใบใหม่ ·
+                นับเป็นสัปดาห์จากวันเริ่มงาน
+              </p>
+              {activeQuotation && (
+                <p className="mt-1 text-xs font-medium text-primary-700">
+                  {estimate.scheduleRevision > 0 && estimate.scheduleUpdatedAt
+                    ? `ปรับปรุงครั้งที่ ${estimate.scheduleRevision} · ${new Date(
+                        estimate.scheduleUpdatedAt,
+                      ).toLocaleDateString('th-TH')} — ต่างจากฉบับใน ${activeQuotation.code}`
+                    : `ตรงกับฉบับใน ${activeQuotation.code}`}
+                </p>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              icon={Printer}
+              onClick={() => window.open(`/print/schedule/${id}`, '_blank')}
+              disabled={(estimate.schedulePhases ?? []).length === 0}
+            >
+              พิมพ์แผนงาน
+            </Button>
+          </div>
+          {/* schedule ไม่ล็อกตามใบเสนอราคา — แผนงานเลื่อนได้หลังเซ็น (§13.8) */}
           <ScheduleEditor
             estimateId={id}
             phases={estimate.schedulePhases ?? []}
             installments={installments}
-            readOnly={scheduleLocked}
+            readOnly={false}
           />
         </CardBody>
       </Card>

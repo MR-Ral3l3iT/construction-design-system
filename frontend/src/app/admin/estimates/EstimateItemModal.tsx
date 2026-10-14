@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Input, Button } from '@construction/ui'
 import { X, Save, Plus } from 'lucide-react'
 import { FormModal } from '@/components/shared/FormModal'
+import { MoneyInput } from '@/components/shared/MoneyInput'
 import { useAddEstimateItem, useUpdateEstimateItem, type EstimateItem } from '@/hooks/useEstimates'
 import { useToast } from '@/providers/toast-provider'
 import { textToLines, type ItemLine } from '@/lib/descLines'
@@ -46,6 +47,7 @@ export function EstimateItemModal({ open, onClose, estimateId, item }: Props) {
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     watch,
@@ -142,11 +144,17 @@ export function EstimateItemModal({ open, onClose, estimateId, item }: Props) {
             <div className="grid grid-cols-3 gap-3">
               <Input label="จำนวน" type="number" step="0.01" {...register('quantity')} />
               <Input label="หน่วย" {...register('unit')} placeholder="เช่น งาน, ตร.ม." />
-              <Input
-                label="ราคาต่อหน่วย (฿)"
-                type="number"
-                step="0.01"
-                {...register('unitPrice')}
+              <Controller
+                control={control}
+                name="unitPrice"
+                render={({ field }) => (
+                  <MoneyInput
+                    label="ราคาต่อหน่วย (฿)"
+                    value={field.value == null ? '' : String(field.value)}
+                    onChange={(raw) => field.onChange(raw)}
+                    onBlur={field.onBlur}
+                  />
+                )}
               />
             </div>
             <div className="rounded-lg bg-primary-50 px-4 py-3 text-sm">

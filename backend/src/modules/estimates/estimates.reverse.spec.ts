@@ -102,4 +102,31 @@ describeDb('EstimatesService.reversePrice (ต้องมี TEST_DATABASE_URL)
       service.reversePrice(est.id, { targetAmount: 10000, afterWht: false }, 1),
     ).rejects.toThrow('ต่ำกว่าราคารวมของรายการอื่น')
   })
+
+  it('ตรงพอดีไม่ได้ → คืนสองตัวเลือก และ prefer above ใช้ด้านสูงกว่า', async () => {
+    const est = await prisma.estimate.create({
+      data: {
+        projectId,
+        code: `REV-OPT-${Date.now()}`,
+        title: 'P2612',
+        whtPercent: 3,
+        items: { create: [{ name: 'ออกแบบ', quantity: 1, unitPrice: 1, totalPrice: 1 }] },
+      },
+    })
+    const below = await service.reversePrice(est.id, { targetAmount: 180000, afterWht: true }, 1)
+    expect(below.options.map((o) => [o.prefer, o.achieved.toFixed(2)])).toEqual([
+      ['below', '179999.99'],
+      ['above', '180000.01'],
+    ])
+    expect(below.achieved.toFixed(2)).toBe('179999.99')
+
+    const above = await service.reversePrice(
+      est.id,
+      { targetAmount: 180000, afterWht: true, prefer: 'above', apply: true },
+      1,
+    )
+    expect(above.item.unitPrice.toFixed(2)).toBe('173076.93')
+    const saved = await service.findOneWithSummary(est.id)
+    expect(saved.summary.netAmount.toFixed(2)).toBe('180000.01')
+  })
 })

@@ -354,6 +354,15 @@ export interface ReversePricePayload {
   itemId?: number
   /** true = บันทึกราคาใหม่ · false = ดูผลก่อน */
   apply?: boolean
+  /** ถ้าตรงพอดีไม่ได้ — below ไม่เกินยอดที่ขอ · above ไม่ต่ำกว่า */
+  prefer?: 'below' | 'above'
+}
+
+export interface ReverseOption {
+  prefer: 'below' | 'above'
+  unitPrice: string
+  achieved: string
+  diff: string
 }
 
 export interface ReversePriceResult {
@@ -372,6 +381,9 @@ export interface ReversePriceResult {
   achieved: string
   /** ยอดที่ได้ − ยอดที่ขอ ("0" = ตรงทุกสตางค์) */
   diff: string
+  prefer: 'below' | 'above'
+  /** 1 ตัวถ้าตรงพอดี · 2 ตัว (ต่ำกว่า/สูงกว่า) ถ้าไม่ได้ */
+  options: ReverseOption[]
   applied: boolean
 }
 

@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger'
 import { EstimateStatus } from '@prisma/client'
 import { Type } from 'class-transformer'
-import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator'
+import { IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator'
 import { CreateEstimateDto } from './create-estimate.dto'
 
 export class UpdateEstimateDto extends PartialType(CreateEstimateDto) {
@@ -54,4 +54,13 @@ export class ReversePriceDto {
   @IsOptional()
   @IsBoolean()
   apply?: boolean
+
+  @ApiPropertyOptional({
+    enum: ['below', 'above'],
+    description:
+      'ถ้าตรงพอดีไม่ได้ เลือกด้านไหน — below ไม่เกินยอดที่ขอ (ค่าตั้งต้น) · above ไม่ต่ำกว่า',
+  })
+  @IsOptional()
+  @IsIn(['below', 'above'])
+  prefer?: 'below' | 'above'
 }

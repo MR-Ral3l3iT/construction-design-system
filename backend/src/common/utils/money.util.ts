@@ -105,6 +105,10 @@ export interface ReverseInput {
   whtRate?: DecimalLike
   /** true = target คือยอดรับสุทธิหลังหัก ณ ที่จ่าย · false = target คือยอดรวม VAT */
   afterWht: boolean
+  /**
+   * ถ้าตรงพอดีไม่ได้ เลือกด้านไหน — below = ไม่เกินยอดที่ขอ (ค่าตั้งต้น) · above = ไม่ต่ำกว่า
+   */
+  prefer?: 'below' | 'above'
 }
 
 export interface ReverseResult {
@@ -123,7 +127,7 @@ export interface ReverseResult {
  * หารตรง ๆ (target ÷ (1 + VAT − WHT)) ได้ค่าประมาณ แต่ VAT และ WHT ถูกปัดทีละตัว
  * ยอดที่คำนวณกลับจึงอาจคลาดไป 1 สตางค์ — ไล่หาราคารอบค่าประมาณทีละสตางค์ ให้ได้ตัวที่
  * calcTax แล้วตรง target พอดี ถ้าไม่มีตัวไหนตรง (เกิดได้เพราะการปัด) เลือกตัวที่ใกล้ที่สุด
- * โดยให้ลูกค้าจ่ายไม่เกินยอดที่ขอ
+ * ในด้านที่ขอ (prefer) — ใช้ reverseOptions เพื่อดูทั้งสองด้าน
  */
 export function reverseFromTarget(input: ReverseInput): ReverseResult {
   const target = round2(input.target)
@@ -139,16 +143,24 @@ export function reverseFromTarget(input: ReverseInput): ReverseResult {
     return { base: totals.baseAmount, totals, achieved, diff: achieved.minus(target) }
   }
 
-  let best = evaluate(estimate)
+  const prefer = input.prefer ?? 'below'
+  let best: ReturnType<typeof evaluate> | null = null
   for (let satang = -5; satang <= 5; satang++) {
     const candidate = evaluate(estimate.plus(D(satang).dividedBy(100)))
     if (candidate.base.lessThan(0)) continue
-    const better =
-      candidate.diff.abs().lessThan(best.diff.abs()) ||
-      // ระยะเท่ากัน → เลือกตัวที่ลูกค้าจ่ายไม่เกินยอดที่ขอ
-      (candidate.diff.abs().equals(best.diff.abs()) && candidate.diff.lessThan(best.diff))
-    if (better) best = candidate
-    if (best.diff.isZero()) break
+    if (candidate.diff.isZero()) return candidate
+    const onSide = prefer === 'below' ? candidate.diff.isNegative() : candidate.diff.isPositive()
+    if (onSide && (!best || candidate.diff.abs().lessThan(best.diff.abs()))) best = candidate
   }
-  return best
+  return best ?? evaluate(estimate)
+}
+
+/**
+ * ตัวเลือกทั้งสองด้านเมื่อตรงพอดีไม่ได้ — ให้ผู้ใช้เลือกเองว่าจะเอาต่ำกว่าหรือสูงกว่ายอดที่ขอ
+ * ตรงพอดีได้ → คืนตัวเดียว
+ */
+export function reverseOptions(input: Omit<ReverseInput, 'prefer'>): ReverseResult[] {
+  const below = reverseFromTarget({ ...input, prefer: 'below' })
+  if (below.diff.isZero()) return [below]
+  return [below, reverseFromTarget({ ...input, prefer: 'above' })]
 }

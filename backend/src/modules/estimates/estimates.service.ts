@@ -20,7 +20,7 @@ import {
   calcLineAmount,
   calcTax,
   D,
-  reverseFromTarget,
+  reverseOptions,
   round2,
   sum,
 } from '../../common/utils/money.util'
@@ -358,22 +358,35 @@ export class EstimatesService {
 
     const vatRate = seller.isVatRegistered ? D(seller.defaultVatRate) : D(0)
     const whtRate = estimate.whtPercent ? D(estimate.whtPercent).dividedBy(100) : D(0)
-    const solved = reverseFromTarget({
-      target: dto.targetAmount,
+    const others = sum(priced.filter((it) => it.id !== item.id).map((it) => it.totalPrice))
+    const target = round2(dto.targetAmount)
+
+    /** ราคาของรายการที่ทำให้ฐานรวมเท่า base แล้วคำนวณยอดจริงหลังปัดราคาต่อหน่วย */
+    const priceFor = (base: Prisma.Decimal) => {
+      const itemAmount = base.minus(others)
+      if (itemAmount.lessThanOrEqualTo(0)) {
+        throw new BadRequestException('ยอดที่ขอต่ำกว่าราคารวมของรายการอื่นแล้ว')
+      }
+      const unitPrice = round2(itemAmount.dividedBy(item.quantity))
+      const lineAmount = calcLineAmount(item.quantity, unitPrice)
+      const summary = calcTax({ subtotal: others.plus(lineAmount), vatRate, whtRate })
+      const achieved = dto.afterWht ? summary.netAmount : summary.grandTotal
+      return { unitPrice, lineAmount, summary, achieved, diff: achieved.minus(target) }
+    }
+
+    // ตรงพอดีไม่ได้ (เพราะ VAT/หัก ณ ที่จ่ายปัดแยกกัน) → มีสองตัวเลือก ต่ำกว่า/สูงกว่า ให้ผู้ใช้เลือก
+    const options = reverseOptions({
+      target,
       vatRate,
       whtRate,
       afterWht: dto.afterWht,
-    })
-
-    const others = sum(priced.filter((it) => it.id !== item.id).map((it) => it.totalPrice))
-    const itemAmount = solved.base.minus(others)
-    if (itemAmount.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('ยอดที่ขอต่ำกว่าราคารวมของรายการอื่นแล้ว')
-    }
-    const unitPrice = round2(itemAmount.dividedBy(item.quantity))
-    const lineAmount = calcLineAmount(item.quantity, unitPrice)
-    const summary = calcTax({ subtotal: others.plus(lineAmount), vatRate, whtRate })
-    const achieved = dto.afterWht ? summary.netAmount : summary.grandTotal
+    }).map((o) => ({
+      prefer: o.diff.isPositive() ? ('above' as const) : ('below' as const),
+      ...priceFor(o.base),
+    }))
+    const chosen =
+      options.find((o) => o.prefer === (dto.prefer ?? 'below') || o.diff.isZero()) ?? options[0]
+    const { unitPrice, lineAmount, summary, achieved } = chosen
 
     if (dto.apply) {
       await this.prisma.estimateItem.update({
@@ -386,7 +399,12 @@ export class EstimatesService {
         action: 'estimate.reverse_priced',
         targetType: 'Estimate',
         targetId: estimateId,
-        metadata: { itemId: item.id, target: dto.targetAmount, afterWht: dto.afterWht },
+        metadata: {
+          itemId: item.id,
+          target: dto.targetAmount,
+          afterWht: dto.afterWht,
+          prefer: chosen.prefer,
+        },
       })
     }
 
@@ -396,7 +414,15 @@ export class EstimatesService {
       item: { id: item.id, name: item.name, quantity: item.quantity, unitPrice, lineAmount },
       summary,
       achieved,
-      diff: achieved.minus(round2(dto.targetAmount)),
+      diff: chosen.diff,
+      prefer: chosen.prefer,
+      /** ตัวเลือกทั้งหมด — 1 ตัวถ้าตรงพอดี, 2 ตัว (below/above) ถ้าไม่ได้ */
+      options: options.map((o) => ({
+        prefer: o.prefer,
+        unitPrice: o.unitPrice,
+        achieved: o.achieved,
+        diff: o.diff,
+      })),
       applied: !!dto.apply,
     }
   }

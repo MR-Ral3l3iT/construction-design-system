@@ -1,5 +1,14 @@
 import { Prisma } from '@prisma/client'
-import { calcLineAmount, calcTax, D, reverseFromTarget, round2, round4, sum } from './money.util'
+import {
+  calcLineAmount,
+  calcTax,
+  D,
+  reverseFromTarget,
+  reverseOptions,
+  round2,
+  round4,
+  sum,
+} from './money.util'
 
 describe('money.util', () => {
   describe('D', () => {
@@ -143,5 +152,35 @@ describe('reverseFromTarget', () => {
   it('ไม่หัก ณ ที่จ่าย + afterWht = เหมือนยอดรวม VAT', () => {
     const r = reverseFromTarget({ target: 107000, vatRate: 0.07, afterWht: true })
     expect(r.base.toFixed(2)).toBe('100000.00')
+  })
+})
+
+describe('reverseOptions / prefer', () => {
+  it('180,000 สุทธิ → ให้เลือก 179,999.99 หรือ 180,000.01', () => {
+    const opts = reverseOptions({ target: 180000, vatRate: 0.07, whtRate: 0.03, afterWht: true })
+    expect(opts.map((o) => [o.base.toFixed(2), o.achieved.toFixed(2)])).toEqual([
+      ['173076.92', '179999.99'],
+      ['173076.93', '180000.01'],
+    ])
+  })
+
+  it('ตรงพอดีได้ → ตัวเลือกเดียว', () => {
+    const opts = reverseOptions({ target: 156000, vatRate: 0.07, whtRate: 0.03, afterWht: true })
+    expect(opts).toHaveLength(1)
+    expect(opts[0].diff.isZero()).toBe(true)
+  })
+
+  it('prefer above ไม่ต่ำกว่ายอดที่ขอ', () => {
+    for (let t = 100000; t < 100050; t++) {
+      const r = reverseFromTarget({
+        target: t / 100 + 1000,
+        vatRate: 0.07,
+        whtRate: 0.03,
+        afterWht: true,
+        prefer: 'above',
+      })
+      expect(r.diff.isNegative()).toBe(false)
+      expect(r.diff.lessThanOrEqualTo(0.01)).toBe(true)
+    }
   })
 })

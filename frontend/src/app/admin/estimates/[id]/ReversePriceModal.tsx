@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Calculator, Check, X } from 'lucide-react'
-import { Button, Input, Select } from '@construction/ui'
+import { Button, Select } from '@construction/ui'
+import { MoneyInput } from '@/components/shared/MoneyInput'
 import { FormModal } from '@/components/shared/FormModal'
 import { useReversePrice, type Estimate, type ReversePriceResult } from '@/hooks/useEstimates'
 import { useToast } from '@/providers/toast-provider'
@@ -31,6 +32,7 @@ export function ReversePriceModal({ open, onClose, estimate }: Props) {
   const [target, setTarget] = useState('')
   const [afterWht, setAfterWht] = useState(hasWht)
   const [itemId, setItemId] = useState('')
+  const [prefer, setPrefer] = useState<'below' | 'above'>('below')
   const [result, setResult] = useState<ReversePriceResult | null>(null)
 
   useEffect(() => {
@@ -38,17 +40,19 @@ export function ReversePriceModal({ open, onClose, estimate }: Props) {
     setTarget('')
     setAfterWht(hasWht)
     setItemId(priced[0] ? String(priced[0].id) : '')
+    setPrefer('below')
     setResult(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  async function run(apply: boolean) {
+  async function run(apply: boolean, side: 'below' | 'above' = prefer) {
     try {
       const r = await reverse.mutateAsync({
         targetAmount: Number(target),
         afterWht,
         itemId: itemId ? Number(itemId) : undefined,
         apply,
+        prefer: side,
       })
       setResult(r)
       if (apply) {
@@ -62,7 +66,6 @@ export function ReversePriceModal({ open, onClose, estimate }: Props) {
     }
   }
 
-  const diff = result ? Number(result.diff) : 0
   const s = result?.summary
 
   return (
@@ -99,17 +102,15 @@ export function ReversePriceModal({ open, onClose, estimate }: Props) {
       }
     >
       <div className="space-y-4">
-        <Input
+        <MoneyInput
           label="ยอดที่ลูกค้าจะจ่าย (บาท)"
-          type="number"
-          min="1"
-          step="0.01"
           value={target}
-          onChange={(e) => {
-            setTarget(e.target.value)
+          onChange={(raw) => {
+            setTarget(raw)
             setResult(null)
           }}
-          placeholder="เช่น 180000"
+          placeholder="เช่น 180,000"
+          autoFocus
         />
         <div className="space-y-2 text-sm text-gray-700">
           <label className="flex items-start gap-2">
@@ -185,11 +186,30 @@ export function ReversePriceModal({ open, onClose, estimate }: Props) {
               <span>{result.afterWht ? 'ยอดรับสุทธิ' : 'ยอดรวม VAT'}</span>
               <span className="tabular-nums">{fmt(result.achieved)}</span>
             </div>
-            {diff !== 0 && (
-              <p className="pt-1 text-xs text-amber-700">
-                ได้ยอดตรงทุกสตางค์ไม่ได้เพราะ VAT และหัก ณ ที่จ่ายถูกปัดเศษแยกกัน — ราคานี้ให้ยอด
-                {diff < 0 ? 'ต่ำกว่า' : 'สูงกว่า'}ที่ขอ {fmt(Math.abs(diff))} บาท
-              </p>
+            {result.options.length > 1 && (
+              <div className="space-y-1.5 border-t pt-2">
+                <p className="text-xs text-amber-700">
+                  ได้ {fmt(result.targetAmount)} พอดีไม่ได้ เพราะ VAT และหัก ณ
+                  ที่จ่ายถูกปัดเศษแยกกัน — เลือกยอดที่ใกล้ที่สุด:
+                </p>
+                {result.options.map((o) => (
+                  <label key={o.prefer} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      checked={prefer === o.prefer}
+                      onChange={() => {
+                        setPrefer(o.prefer)
+                        void run(false, o.prefer)
+                      }}
+                    />
+                    <span className="tabular-nums font-medium">{fmt(o.achieved)}</span>
+                    <span className="text-xs text-gray-500">
+                      ({o.prefer === 'below' ? 'ต่ำกว่า' : 'สูงกว่า'}{' '}
+                      {fmt(Math.abs(Number(o.diff)))}· ราคา {fmt(o.unitPrice)})
+                    </span>
+                  </label>
+                ))}
+              </div>
             )}
           </div>
         )}
